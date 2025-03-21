@@ -14,6 +14,7 @@ This project is a 3D Editor built using Direct3D 12 (D3D12) and C++. It provides
 - **Scene management** for handling multiple objects
 - **Camera controls** (orbit, pan, zoom)
 - **Model import/export** support (OBJ, FBX, etc.)
+- **Ambient occlusion**
 
 ## Requirements
 - Windows 10/11
