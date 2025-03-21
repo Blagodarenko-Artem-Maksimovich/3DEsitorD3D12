@@ -18,8 +18,6 @@ This project is a 3D Editor built using Direct3D 12 (D3D12) and C++. It provides
 - Visual Studio 2019/2022
 - DirectX 12 SDK
 - C++17 or later
-- [Assimp](https://github.com/assimp/assimp) (for model loading)
-- [Dear ImGui](https://github.com/ocornut/imgui) (for UI rendering)
 
 ## Usage
 - **Load a model**: Drag and drop an OBJ or FBX file into the editor.
