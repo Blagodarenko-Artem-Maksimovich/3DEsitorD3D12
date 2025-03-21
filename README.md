@@ -3,7 +3,7 @@
 ## Overview
 This project is a 3D Editor built using Direct3D 12 (D3D12) and C++. It provides a platform for rendering and manipulating 3D objects with real-time rendering capabilities.
 
-![Spomza](https://github.com/Blagodarenko-Artem-Maksimovich/3DEsitorD3D12/edit/main/img/Sponza.png)
+![Sponza](https://github.com/Blagodarenko-Artem-Maksimovich/3DEsitorD3D12/blob/main/img/Sponza.png)
 
 ## Features
 - **Real-time 3D rendering** using Direct3D 12
