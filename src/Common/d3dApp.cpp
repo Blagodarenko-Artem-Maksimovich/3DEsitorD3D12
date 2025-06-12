@@ -4,11 +4,13 @@
 
 #include "d3dApp.h"
 #include <WindowsX.h>
-
+#include "imgui.h"
+#include "imgui_impl_dx12.h"
+#include "imgui_impl_win32.h"
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
-
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK
 MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -117,7 +119,7 @@ int D3DApp::Run()
 				}
 				CalculateFrameStats();
 				Update(mTimer);	
-                Draw(mTimer);
+                DeferredDraw(mTimer);
 				
 				
 			}
@@ -148,7 +150,7 @@ bool D3DApp::Initialize()
 void D3DApp::CreateRtvAndDsvDescriptorHeaps()
 {
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
-    rtvHeapDesc.NumDescriptors = SwapChainBufferCount;
+    rtvHeapDesc.NumDescriptors = SwapChainBufferCount+3;
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	rtvHeapDesc.NodeMask = 0;
@@ -264,6 +266,8 @@ void D3DApp::OnResize()
  
 LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+		return true;
 	switch( msg )
 	{
 	// WM_ACTIVATE is sent when the window is activated or deactivated.  
@@ -357,6 +361,9 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
  
 	// WM_DESTROY is sent when the window is being destroyed.
 	case WM_DESTROY:
+		ImGui_ImplDX12_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext();
 		PostQuitMessage(0);
 		return 0;
 
@@ -454,9 +461,9 @@ bool D3DApp::InitDirect3D()
 #if defined(DEBUG) || defined(_DEBUG) 
 	// Enable the D3D12 debug layer.
 {
-	/*ComPtr<ID3D12Debug> debugController;
-	ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
-	debugController->EnableDebugLayer();*/
+	//ComPtr<ID3D12Debug> debugController;
+	//ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
+	//debugController->EnableDebugLayer();
 }
 #endif
 
