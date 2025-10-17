@@ -26,6 +26,7 @@ cbuffer cbPassShadow : register(b1) // Using b1, ensure it's distinct or managed
     float4x4 gLightViewProj;
 };
 
+
 VertexOut VS(VertexIn vin)
 {
     VertexOut vout = (VertexOut) 0.0f;

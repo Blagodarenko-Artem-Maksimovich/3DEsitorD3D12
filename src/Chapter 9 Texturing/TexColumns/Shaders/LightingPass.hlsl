@@ -2,7 +2,7 @@
 
 
 #include "LightingUtil.hlsl"
-Texture2D gShadowMap : register(t3); 
+Texture2D gShadowMap : register(t3);
 Texture2D gPositionMap : register(t2);
 Texture2D gNormalMap : register(t1);
 Texture2D gAlbedoMap : register(t0);
@@ -12,7 +12,7 @@ SamplerState gsamLinearWrap : register(s2);
 SamplerState gsamLinearClamp : register(s3);
 SamplerState gsamAnisotropicWrap : register(s4);
 SamplerState gsamAnisotropicClamp : register(s5);
-SamplerComparisonState gsamShadow : register(s6); 
+SamplerComparisonState gsamShadow : register(s6);
 
 
 
@@ -167,17 +167,17 @@ float4 PS(VSOut pin) : SV_TARGET
     switch (light.type)
     {
         case 0:
-            lighting = light.Strength * albedo;
+            lighting = light.Strength * light.Color * albedo.rgb;
             break;
         case 1:
             lighting = ComputePointLight(light, mat, posW, normalW, toEyeW);
             break;
         case 2:
-            lighting = ComputeDirectionalLight(light, mat, normalW, toEyeW,shadowFactor);
+            lighting = ComputeDirectionalLight(light, mat, normalW, toEyeW, shadowFactor);
             break;
         case 3:
-            lighting = ComputeSpotLight(light, mat, posW, normalW, toEyeW,shadowFactor);
-           // lighting = float4(1, 1, 1, 1);
+            lighting = ComputeSpotLight(light, mat, posW, normalW, toEyeW, shadowFactor);
+   
             break;
     }
     

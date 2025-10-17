@@ -172,9 +172,9 @@
     <ClCompile Include="..\..\Common\imgui_tables.cpp" />
     <ClCompile Include="..\..\Common\imgui_widgets.cpp" />
     <ClCompile Include="..\..\Common\MathHelper.cpp" />
-    <ClCompile Include="..\..\Common\model.cpp" />
     <ClCompile Include="FrameResource.cpp" />
-    <ClCompile Include="Scene.cpp" />
+    <ClCompile Include="NoiseGeneration.cpp" />
+    <ClCompile Include="TerrainSystem.cpp" />
     <ClCompile Include="TexColumnsApp.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -194,11 +194,12 @@
     <ClInclude Include="..\..\Common\imstb_textedit.h" />
     <ClInclude Include="..\..\Common\imstb_truetype.h" />
     <ClInclude Include="..\..\Common\MathHelper.h" />
-    <ClInclude Include="..\..\Common\model.h" />
     <ClInclude Include="..\..\Common\UploadBuffer.h" />
     <ClInclude Include="FrameResource.h" />
+    <ClInclude Include="NoiseGeneration.h" />
     <ClInclude Include="RenderItem.h" />
-    <ClInclude Include="Scene.h" />
+    <ClInclude Include="TerrainSystem.h" />
+    <ClInclude Include="TexColumnsApp.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="Shaders\Default.hlsl">
@@ -222,6 +223,9 @@
     <Text Include="Shaders\ShadowMap.hlsl">
       <FileType>Document</FileType>
     </Text>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Shaders\Terrain.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

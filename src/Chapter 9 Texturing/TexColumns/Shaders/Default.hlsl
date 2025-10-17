@@ -18,15 +18,15 @@
 // Include structures and functions for lighting.
 #include "LightingUtil.hlsl"
 
-Texture2D    gDiffuseMap : register(t0);
-Texture2D    gNormalMap : register(t1);
+Texture2D gDiffuseMap : register(t0);
+Texture2D gNormalMap : register(t1);
 
 
-SamplerState gsamPointWrap        : register(s0);
-SamplerState gsamPointClamp       : register(s1);
-SamplerState gsamLinearWrap       : register(s2);
-SamplerState gsamLinearClamp      : register(s3);
-SamplerState gsamAnisotropicWrap  : register(s4);
+SamplerState gsamPointWrap : register(s0);
+SamplerState gsamPointClamp : register(s1);
+SamplerState gsamLinearWrap : register(s2);
+SamplerState gsamLinearClamp : register(s3);
+SamplerState gsamAnisotropicWrap : register(s4);
 SamplerState gsamAnisotropicClamp : register(s5);
 
 // Constant data that varies per frame.
@@ -34,7 +34,7 @@ cbuffer cbPerObject : register(b0)
 {
     float4x4 gWorld;
     float4x4 gInvWorld;
-	float4x4 gTexTransform;
+    float4x4 gTexTransform;
 };
 
 // Constant data that varies per material.
@@ -65,26 +65,26 @@ cbuffer cbPass : register(b1)
 
 cbuffer cbMaterial : register(b2)
 {
-	float4   gDiffuseAlbedo;
-    float3   gFresnelR0;
-    float    gRoughness;
-	float4x4 gMatTransform;
+    float4 gDiffuseAlbedo;
+    float3 gFresnelR0;
+    float gRoughness;
+    float4x4 gMatTransform;
 };
 
 struct VertexIn
 {
-	float3 PosL    : POSITION;
+    float3 PosL : POSITION;
     float3 NormalL : NORMAL;
-	float2 TexC    : TEXCOORD;
+    float2 TexC : TEXCOORD;
     float3 Tan : TANGENT;
 };
 
 struct VertexOut
 {
-	float4 PosH    : SV_POSITION;
-    float3 PosW    : POSITION;
+    float4 PosH : SV_POSITION;
+    float3 PosW : POSITION;
     float3 NormalW : NORMAL;
-	float2 TexC    : TEXCOORD;
+    float2 TexC : TEXCOORD;
     float3 Tan : TANGENT;
 };
 float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW)
@@ -106,7 +106,7 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
 }
 VertexOut VS(VertexIn vin)
 {
-	VertexOut vout = (VertexOut)0.0f;
+    VertexOut vout = (VertexOut) 0.0f;
     // Transform to world space.
     float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
     vout.PosW = posW;
@@ -117,7 +117,7 @@ VertexOut VS(VertexIn vin)
     vout.TexC = mul(texC, gMatTransform).xy;
     
     // Assumes nonuniform scaling; otherwise, need to use inverse-transpose of world matrix.
-    vout.NormalW = mul(vin.NormalL, (float3x3)gWorld);
+    vout.NormalW = mul(vin.NormalL, (float3x3) gWorld);
     vout.Tan = mul(vin.Tan, (float3x3) gWorld);
     // Transform to homogeneous clip space.
 
@@ -141,7 +141,7 @@ float4 PS(VertexOut pin) : SV_Target
     float3 toEyeW = normalize(gEyePosW - pin.PosW);
 
     // Light terms.
-    float4 ambient = gAmbientLight*diffuseAlbedo;
+    float4 ambient = gAmbientLight * diffuseAlbedo;
 
     const float shininess = 1.0f - gRoughness;
     Material mat = { diffuseAlbedo, gFresnelR0, shininess };

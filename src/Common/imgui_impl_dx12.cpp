@@ -63,24 +63,24 @@ struct ImGui_ImplDX12_RenderBuffers;
 
 struct ImGui_ImplDX12_Texture
 {
-    ID3D12Resource*             pTextureResource;
+    ID3D12Resource* pTextureResource;
     D3D12_CPU_DESCRIPTOR_HANDLE hFontSrvCpuDescHandle;
     D3D12_GPU_DESCRIPTOR_HANDLE hFontSrvGpuDescHandle;
 
-    ImGui_ImplDX12_Texture()    { memset((void*)this, 0, sizeof(*this)); }
+    ImGui_ImplDX12_Texture() { memset((void*)this, 0, sizeof(*this)); }
 };
 
 struct ImGui_ImplDX12_Data
 {
     ImGui_ImplDX12_InitInfo     InitInfo;
-    ID3D12Device*               pd3dDevice;
-    ID3D12RootSignature*        pRootSignature;
-    ID3D12PipelineState*        pPipelineState;
-    ID3D12CommandQueue*         pCommandQueue;
+    ID3D12Device* pd3dDevice;
+    ID3D12RootSignature* pRootSignature;
+    ID3D12PipelineState* pPipelineState;
+    ID3D12CommandQueue* pCommandQueue;
     bool                        commandQueueOwned;
     DXGI_FORMAT                 RTVFormat;
     DXGI_FORMAT                 DSVFormat;
-    ID3D12DescriptorHeap*       pd3dSrvDescHeap;
+    ID3D12DescriptorHeap* pd3dSrvDescHeap;
     UINT                        numFramesInFlight;
 
     ImGui_ImplDX12_RenderBuffers* pFrameResources;
@@ -89,7 +89,7 @@ struct ImGui_ImplDX12_Data
     ImGui_ImplDX12_Texture      FontTexture;
     bool                        LegacySingleDescriptorUsed;
 
-    ImGui_ImplDX12_Data()       { memset((void*)this, 0, sizeof(*this)); frameIndex = UINT_MAX; }
+    ImGui_ImplDX12_Data() { memset((void*)this, 0, sizeof(*this)); frameIndex = UINT_MAX; }
 };
 
 // Backend data stored in io.BackendRendererUserData to allow support for multiple Dear ImGui contexts
@@ -102,8 +102,8 @@ static ImGui_ImplDX12_Data* ImGui_ImplDX12_GetBackendData()
 // Buffers used during the rendering of a frame
 struct ImGui_ImplDX12_RenderBuffers
 {
-    ID3D12Resource*     IndexBuffer;
-    ID3D12Resource*     VertexBuffer;
+    ID3D12Resource* IndexBuffer;
+    ID3D12Resource* VertexBuffer;
     int                 IndexBufferSize;
     int                 VertexBufferSize;
 };
@@ -128,10 +128,10 @@ static void ImGui_ImplDX12_SetupRenderState(ImDrawData* draw_data, ID3D12Graphic
         float B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
         float mvp[4][4] =
         {
-            { 2.0f/(R-L),   0.0f,           0.0f,       0.0f },
-            { 0.0f,         2.0f/(T-B),     0.0f,       0.0f },
+            { 2.0f / (R - L),   0.0f,           0.0f,       0.0f },
+            { 0.0f,         2.0f / (T - B),     0.0f,       0.0f },
             { 0.0f,         0.0f,           0.5f,       0.0f },
-            { (R+L)/(L-R),  (T+B)/(B-T),    0.5f,       1.0f },
+            { (R + L) / (L - R),  (T + B) / (B - T),    0.5f,       1.0f },
         };
         memcpy(&vertex_constant_buffer.mvp, mvp, sizeof(mvp));
     }
@@ -234,7 +234,7 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data, ID3D12GraphicsCommandL
 
     // Upload vertex/index data into a single contiguous GPU buffer
     // During Map() we specify a null read range (as per DX12 API, this is informational and for tooling only)
-    void* vtx_resource, *idx_resource;
+    void* vtx_resource, * idx_resource;
     D3D12_RANGE range = { 0, 0 };
     if (fr->VertexBuffer->Map(0, &range, &vtx_resource) != S_OK)
         return;
@@ -377,7 +377,7 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         hr = uploadBuffer->Map(0, &range, &mapped);
         IM_ASSERT(SUCCEEDED(hr));
         for (int y = 0; y < height; y++)
-            memcpy((void*) ((uintptr_t) mapped + y * upload_pitch), pixels + y * width * 4, width * 4);
+            memcpy((void*)((uintptr_t)mapped + y * upload_pitch), pixels + y * width * 4, width * 4);
         uploadBuffer->Unmap(0, &range);
 
         D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
@@ -399,10 +399,10 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         D3D12_RESOURCE_BARRIER barrier = {};
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barrier.Transition.pResource   = pTexture;
+        barrier.Transition.pResource = pTexture;
         barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-        barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
         ID3D12Fence* fence = nullptr;
         hr = bd->pd3dDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
@@ -746,19 +746,19 @@ bool ImGui_ImplDX12_Init(ImGui_ImplDX12_InitInfo* init_info)
         // Wrap legacy behavior of passing space for a single descriptor
         IM_ASSERT(init_info->LegacySingleSrvCpuDescriptor.ptr != 0 && init_info->LegacySingleSrvGpuDescriptor.ptr != 0);
         init_info->SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle)
-        {
-            ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
-            IM_ASSERT(bd->LegacySingleDescriptorUsed == false && "Only 1 simultaneous texture allowed with legacy ImGui_ImplDX12_Init() signature!");
-            *out_cpu_handle = bd->InitInfo.LegacySingleSrvCpuDescriptor;
-            *out_gpu_handle = bd->InitInfo.LegacySingleSrvGpuDescriptor;
-            bd->LegacySingleDescriptorUsed = true;
-        };
+            {
+                ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
+                IM_ASSERT(bd->LegacySingleDescriptorUsed == false && "Only 1 simultaneous texture allowed with legacy ImGui_ImplDX12_Init() signature!");
+                *out_cpu_handle = bd->InitInfo.LegacySingleSrvCpuDescriptor;
+                *out_gpu_handle = bd->InitInfo.LegacySingleSrvGpuDescriptor;
+                bd->LegacySingleDescriptorUsed = true;
+            };
         init_info->SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE)
-        {
-            ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
-            IM_ASSERT(bd->LegacySingleDescriptorUsed == true);
-            bd->LegacySingleDescriptorUsed = false;
-        };
+            {
+                ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
+                IM_ASSERT(bd->LegacySingleDescriptorUsed == true);
+                bd->LegacySingleDescriptorUsed = false;
+            };
     }
 #endif
 

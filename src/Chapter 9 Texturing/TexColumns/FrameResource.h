@@ -1,14 +1,14 @@
 #pragma once
 
-#include "../../Common/d3dUtil.h"
-#include "../../Common/MathHelper.h"
-#include "../../Common/UploadBuffer.h"
+#include "../Common/d3dUtil.h"
+#include "../Common/MathHelper.h"
+#include "../Common/UploadBuffer.h"
 
 struct ObjectConstants
 {
     DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
     DirectX::XMFLOAT4X4 InvWorld = MathHelper::Identity4x4();
-	DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
+    DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
 };
 
 struct PassConstants
@@ -51,19 +51,29 @@ struct Vertex
 {
     DirectX::XMFLOAT3 Pos;
     DirectX::XMFLOAT3 Normal;
-	DirectX::XMFLOAT2 TexC;
+    DirectX::XMFLOAT2 TexC;
     DirectX::XMFLOAT3 Tangent;
     Vertex(DirectX::XMFLOAT3 _pos, DirectX::XMFLOAT3 _nm, DirectX::XMFLOAT2 _uv, DirectX::XMFLOAT3 _tan);
     Vertex() {};
 };
 
+struct TerrainTileConstants
+{
+    DirectX::XMFLOAT3 TilePosition;
+    float TileSize;
+    float mapSize;
+    float hScale;
+    float showborders = 1;
+    float debugMode = 1;
+    float renderHMAP = 0;
+};
 // Stores the resources needed for the CPU to build the command lists
 // for a frame.  
 struct FrameResource
 {
 public:
-    
-    FrameResource(ID3D12Device* device, UINT passCount, UINT objectCount, UINT materialCount,UINT lightCount);
+
+    FrameResource(ID3D12Device* device, UINT passCount, UINT objectCount, UINT materialCount, UINT lightCount, UINT tileCount);
     FrameResource(const FrameResource& rhs) = delete;
     FrameResource& operator=(const FrameResource& rhs) = delete;
     ~FrameResource();
@@ -80,6 +90,7 @@ public:
     std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
     std::unique_ptr<UploadBuffer<LightConstants>> LightCB = nullptr;
     std::unique_ptr<UploadBuffer<PassShadowConstants>> PassShadowCB = nullptr;
+    std::unique_ptr<UploadBuffer<TerrainTileConstants>> TerrainCB = nullptr;
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.
     UINT64 Fence = 0;

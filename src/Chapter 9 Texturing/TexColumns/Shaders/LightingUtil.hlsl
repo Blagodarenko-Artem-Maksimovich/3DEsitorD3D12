@@ -10,10 +10,10 @@ struct Light
 {
     float3 Color;
     float FalloffStart; // point/spot light only
-    float3 Direction;   // directional/spot light only
-    float FalloffEnd;   // point/spot light only
-    float3 Position;    // point light only
-    float SpotPower;    // spot light only
+    float3 Direction; // directional/spot light only
+    float FalloffEnd; // point/spot light only
+    float3 Position; // point light only
+    float SpotPower; // spot light only
     int type;
     float Strength;
     int CastsShadows;
@@ -37,7 +37,7 @@ struct Material
 float CalcAttenuation(float d, float falloffStart, float falloffEnd)
 {
     // Linear falloff.
-    return saturate((falloffEnd-d) / (falloffEnd - falloffStart));
+    return saturate((falloffEnd - d) / (falloffEnd - falloffStart));
 }
 
 // Schlick gives an approximation to Fresnel reflectance (see pg. 233 "Real-Time Rendering 3rd Ed.").
@@ -47,7 +47,7 @@ float3 SchlickFresnel(float3 R0, float3 normal, float3 lightVec)
     float cosIncidentAngle = saturate(dot(normal, lightVec));
 
     float f0 = 1.0f - cosIncidentAngle;
-    float3 reflectPercent = R0 + (1.0f - R0)*(f0*f0*f0*f0*f0);
+    float3 reflectPercent = R0 + (1.0f - R0) * (f0 * f0 * f0 * f0 * f0);
 
     return reflectPercent;
 }
@@ -57,10 +57,10 @@ float3 BlinnPhong(float3 lightStrength, float3 lightVec, float3 normal, float3 t
     const float m = mat.Shininess * 256.0f;
     float3 halfVec = normalize(toEye + lightVec);
 
-    float roughnessFactor = (m + 8.0f)*pow(max(dot(halfVec, normal), 0.0f), m) / 8.0f;
+    float roughnessFactor = (m + 8.0f) * pow(max(dot(halfVec, normal), 0.0f), m) / 8.0f;
     float3 fresnelFactor = SchlickFresnel(mat.FresnelR0, halfVec, lightVec);
 
-    float3 specAlbedo = fresnelFactor*roughnessFactor;
+    float3 specAlbedo = fresnelFactor * roughnessFactor;
 
     // Our spec formula goes outside [0,1] range, but we are 
     // doing LDR rendering.  So scale it down a bit.
@@ -79,7 +79,7 @@ float3 ComputeDirectionalLight(Light L, Material mat, float3 normal, float3 toEy
 
     // Scale light down by Lambert's cosine law.
     float ndotl = max(dot(lightVec, normal), 0.0f);
-    float3 lightStrength = L.Color*L.Strength * ndotl * shadowFactor;
+    float3 lightStrength = L.Color * L.Strength * ndotl * shadowFactor;
 
     return BlinnPhong(lightStrength, lightVec, normal, toEye, mat);
 }
@@ -96,7 +96,7 @@ float3 ComputePointLight(Light L, Material mat, float3 pos, float3 normal, float
     float d = length(lightVec);
 
     // Range test.
-    if(d > L.FalloffEnd)
+    if (d > L.FalloffEnd)
         return 0.0f;
 
     // Normalize the light vector.
@@ -104,7 +104,7 @@ float3 ComputePointLight(Light L, Material mat, float3 pos, float3 normal, float
 
     // Scale light down by Lambert's cosine law.
     float ndotl = max(dot(lightVec, normal), 0.0f);
-    float3 lightStrength = L.Color*L.Strength * ndotl;
+    float3 lightStrength = L.Color * L.Strength * ndotl;
 
     // Attenuate light by distance.
     float att = CalcAttenuation(d, L.FalloffStart, L.FalloffEnd);
@@ -126,7 +126,7 @@ float3 ComputeSpotLight(Light L, Material mat, float3 pos, float3 normal, float3
     float d = length(lightVec);
 
     // Range test.
-    if(d > L.FalloffEnd)
+    if (d > L.FalloffEnd)
         return 0.0f;
 
     // Normalize the light vector.
@@ -134,7 +134,7 @@ float3 ComputeSpotLight(Light L, Material mat, float3 pos, float3 normal, float3
 
     // Scale light down by Lambert's cosine law.
     float ndotl = max(dot(lightVec, normal), 0.0f);
-    float3 lightStrength = L.Color*L.Strength * ndotl;
+    float3 lightStrength = L.Color * L.Strength * ndotl;
 
     // Attenuate light by distance.
     float att = CalcAttenuation(d, L.FalloffStart, L.FalloffEnd);
