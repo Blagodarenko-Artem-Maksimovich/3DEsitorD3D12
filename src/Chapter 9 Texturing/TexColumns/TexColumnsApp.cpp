@@ -1238,7 +1238,7 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 		mShaders["standardVS"] = d3dUtil::CompileShader(L"Shaders\\Default.hlsl", nullptr, "VS", "vs_5_1");
 		mShaders["opaquePS"] = d3dUtil::CompileShader(L"Shaders\\Default.hlsl", nullptr, "PS", "ps_5_1");
 
-		// Геометрия пасс
+	/*	// Геометрия пасс
 		mShaders["gbufferVS"] = d3dUtil::CompileShader(L"Shaders\\GeometryPass.hlsl", nullptr, "VS", "vs_5_1");
 		mShaders["gbufferPS"] = d3dUtil::CompileShader(L"Shaders\\GeometryPass.hlsl", nullptr, "PS", "ps_5_1");
 
@@ -1253,7 +1253,7 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 
 		// Террейн
 		mShaders["terrainVS"] = d3dUtil::CompileShader(L"Shaders\\Terrain.hlsl", nullptr, "VS", "vs_5_1");
-		mShaders["terrainPS"] = d3dUtil::CompileShader(L"Shaders\\Terrain.hlsl", nullptr, "PS", "ps_5_1");
+		mShaders["terrainPS"] = d3dUtil::CompileShader(L"Shaders\\Terrain.hlsl", nullptr, "PS", "ps_5_1");*/
 
 		std::cout << "All shaders compiled successfully!" << std::endl;
 	}
@@ -1601,7 +1601,7 @@ void TexColumnsApp::BuildPSOs()
 
 	// Lighting pass PSO
 
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC lightPsoDesc = {};
+	/*D3D12_GRAPHICS_PIPELINE_STATE_DESC lightPsoDesc = {};
 	lightPsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() }; // если используем SV_VertexID в шейдере, входного layout не нужно
 	lightPsoDesc.pRootSignature = mLightingRootSignature.Get(); // наша новая корнев. сигнатура для освещения
 	lightPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["lightingVS"]->GetBufferPointer()),
@@ -1721,7 +1721,7 @@ void TexColumnsApp::BuildPSOs()
 	// TERRAIN WIREFRAME
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC terrainPsoDescWireframe = terrainPsoDesc;
 	terrainPsoDescWireframe.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&terrainPsoDescWireframe, IID_PPV_ARGS(&mPSOs["terrainWIRE"])));
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&terrainPsoDescWireframe, IID_PPV_ARGS(&mPSOs["terrainWIRE"])));*/
 }
 
 void TexColumnsApp::BuildFrameResources()
