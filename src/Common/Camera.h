@@ -25,7 +25,7 @@ public:
 	DirectX::XMFLOAT3 GetPosition3f()const;
 	void SetPosition(float x, float y, float z);
 	void SetPosition(const DirectX::XMFLOAT3& v);
-
+	
 	// Get camera basis vectors.
 	DirectX::XMVECTOR GetRight()const;
 	DirectX::XMFLOAT3 GetRight3f()const;
@@ -46,7 +46,7 @@ public:
 	float GetNearWindowHeight()const;
 	float GetFarWindowWidth()const;
 	float GetFarWindowHeight()const;
-
+	
 	// Set frustum.
 	void SetLens(float fovY, float aspect, float zn, float zf);
 
@@ -65,22 +65,13 @@ public:
 	void Strafe(float d);
 	void Walk(float d);
 
-	void AddSpeed(float alpha);
-	float& GetSpeed();
-	void SetSpeed(float _speed);
-	void IncreaseSpeed(float delta);
 	// Rotate the camera.
 	void Pitch(float angle);
-	void Yaw(float angle);
-	void YawPitch(float Yaw, float Pitch);
 	void RotateY(float angle);
-	void RotateX(float angle);
-	void SpeedUp();
-	void SpeedDown();
+
 	// After modifying camera position/orientation, call to rebuild the view matrix.
 	void UpdateViewMatrix();
-	void UpdateFrustum();
-	DirectX::BoundingFrustum GetFrustum() const;
+
 private:
 
 	// Camera coordinate system with coordinates relative to world space.
@@ -88,10 +79,8 @@ private:
 	DirectX::XMFLOAT3 mRight = { 1.0f, 0.0f, 0.0f };
 	DirectX::XMFLOAT3 mUp = { 0.0f, 1.0f, 0.0f };
 	DirectX::XMFLOAT3 mLook = { 0.0f, 0.0f, 1.0f };
-	DirectX::XMFLOAT4 orientation;
+
 	// Cache frustum properties.
-	float mYaw = 0.0f;
-	float mPitch = 0.0f;
 	float mNearZ = 0.0f;
 	float mFarZ = 0.0f;
 	float mAspect = 0.0f;
@@ -99,11 +88,8 @@ private:
 	float mNearWindowHeight = 0.0f;
 	float mFarWindowHeight = 0.0f;
 
-	float CurSpeed = 3.0f;
-	float BaseSpeed = 3.0f;
-	float MaxSpeed = 20.0f;
 	bool mViewDirty = true;
-	DirectX::BoundingFrustum mFrustum;
+
 	// Cache View/Proj matrices.
 	DirectX::XMFLOAT4X4 mView = MathHelper::Identity4x4();
 	DirectX::XMFLOAT4X4 mProj = MathHelper::Identity4x4();

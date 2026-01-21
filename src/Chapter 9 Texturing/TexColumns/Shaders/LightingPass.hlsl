@@ -1,20 +1,4 @@
-// LightingPass.hlsl
-
-
 #include "LightingUtil.hlsl"
-Texture2D gShadowMap : register(t3);
-Texture2D gPositionMap : register(t2);
-Texture2D gNormalMap : register(t1);
-Texture2D gAlbedoMap : register(t0);
-SamplerState gsamPointWrap : register(s0);
-SamplerState gsamPointClamp : register(s1);
-SamplerState gsamLinearWrap : register(s2);
-SamplerState gsamLinearClamp : register(s3);
-SamplerState gsamAnisotropicWrap : register(s4);
-SamplerState gsamAnisotropicClamp : register(s5);
-SamplerComparisonState gsamShadow : register(s6);
-
-
 
 cbuffer cbPass : register(b0)
 {
@@ -24,6 +8,7 @@ cbuffer cbPass : register(b0)
     float4x4 gInvProj;
     float4x4 gViewProj;
     float4x4 gInvViewProj;
+    float4x4 gShadowTransform;
     float3 gEyePosW;
     float cbPerObjectPad1;
     float2 gRenderTargetSize;
@@ -33,31 +18,113 @@ cbuffer cbPass : register(b0)
     float gTotalTime;
     float gDeltaTime;
     float4 gAmbientLight;
-
-    // Indices [0, NUM_DIR_LIGHTS) are directional lights;
-    // indices [NUM_DIR_LIGHTS, NUM_DIR_LIGHTS+NUM_POINT_LIGHTS) are point lights;
-    // indices [NUM_DIR_LIGHTS+NUM_POINT_LIGHTS, NUM_DIR_LIGHTS+NUM_POINT_LIGHT+NUM_SPOT_LIGHTS)
-    // are spot lights for a maximum of MaxLights per object.
-    Light gLights[MaxLights];
 };
-cbuffer cbPerObject : register(b1)
+
+cbuffer LightConstants : register(b1)
 {
+    float3 Color;
+    float FalloffStart; // point/spot light only
+    float3 Direction; // directional/spot light only
+    float FalloffEnd; // point/spot light only
+    float3 Position; // point light only
+    float SpotPower; // spot light only
+    int type;
+    float Strength;
+    int CastsShadows;
+    int isDebugOn;
     float4x4 gWorld;
-    float4x4 gInvWorld;
-    float4x4 gTexTransform;
+    float4x4 LightViewProj; // World space to Light's clip space for shadow mapping
+    int enablePCF;
+    int pcf_level;
+}
+TextureCube gCubeMap : register(t0);
+Texture2D gShadowMap : register(t1);
+
+// Входные текстуры G-Buffer (Привяжем их в слоты t3, t4, t5 в новом Root Signature)
+Texture2D gGBuffer0 : register(t2); // Albedo + Roughness
+Texture2D gGBuffer1 : register(t3); // Normal + Fresnel
+Texture2D gGBuffer2 : register(t4); // Position
+
+
+struct MaterialData
+{
+    float4 DiffuseAlbedo;
+    float3 FresnelR0;
+    float Roughness;
+    float4x4 MatTransform;
+    uint DiffuseMapIndex;
+    uint NormalMapIndex;
+    uint MatPad1;
+    uint MatPad2;
 };
 
-cbuffer cbLight : register(b2)
+SamplerState gsamPointWrap : register(s0);
+SamplerState gsamPointClamp : register(s1);
+SamplerState gsamLinearWrap : register(s2);
+SamplerState gsamLinearClamp : register(s3);
+SamplerState gsamAnisotropicWrap : register(s4);
+SamplerState gsamAnisotropicClamp : register(s5);
+SamplerComparisonState gsamShadow : register(s6);
+
+float CalcShadowFactor(float4 shadowPosH)
 {
-    Light light;
+    // Complete projection by doing division by w.
+    shadowPosH.xyz /= shadowPosH.w;
+
+    // Depth in NDC space.
+    float depth = shadowPosH.z;
+
+    uint width, height, numMips;
+    gShadowMap.GetDimensions(0, width, height, numMips);
+
+    // Texel size.
+    float dx = 1.0f / (float) width;
+
+    float percentLit = 0.0f;
+    const float2 offsets[9] =
+    {
+        float2(-dx, -dx), float2(0.0f, -dx), float2(dx, -dx),
+        float2(-dx, 0.0f), float2(0.0f, 0.0f), float2(dx, 0.0f),
+        float2(-dx, +dx), float2(0.0f, +dx), float2(dx, +dx)
+    };
+
+    [unroll]
+    for (int i = 0; i < 9; ++i)
+    {
+        percentLit += gShadowMap.SampleCmpLevelZero(gsamShadow,
+            shadowPosH.xy + offsets[i], depth).r;
+    }
+    
+    return percentLit / 9.0f;
 }
-// Вершинный шейдер для полноэкранного треугольника
+
+
+struct VertexIn
+{
+    float3 PosL : POSITION;
+    float3 NormalL : NORMAL;
+    float2 TexC : TEXCOORD;
+    float3 Tan : TANGENT;
+};
+struct VertexOut
+{
+    float4 PosH : SV_POSITION;
+    float2 TexC : TEXCOORD;
+};
+
+
 struct VSOut
 {
     float4 PosH : SV_POSITION;
     float2 TexC : TEXCOORD;
 };
 
+struct PixelOut
+{
+    float4 BackBuffer : SV_Target0;
+    float4 CurrentFrameTexture : SV_Target1;
+};
+// draw full-screen quad without VertexBuffer
 VSOut VS_QUAD(uint vid : SV_VertexID)
 {
     VSOut output;
@@ -75,44 +142,47 @@ VSOut VS_QUAD(uint vid : SV_VertexID)
     
     return output;
 }
-struct VertexIn
-{
-    float3 PosL : POSITION;
-    float3 NormalL : NORMAL;
-    float2 TexC : TEXCOORD;
-    float3 Tan : TANGENT;
-};
 
-struct VertexOut
-{
-    float4 PosH : SV_POSITION;
-    float3 PosW : POSITION;
-    float3 NormalW : NORMAL;
-    float2 TexC : TEXCOORD;
-    float3 Tan : TANGENT;
-};
 VSOut VS(VertexIn vin)
 {
     VSOut vout = (VSOut) 0.0f;
     // Transform to world space.
-    float4 posW = mul(float4(vin.PosL, 1.0f), light.gWorld);
+    float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
 
     vout.PosH = mul(posW, gViewProj);
     
     return vout;
 }
 
+
 // Пиксельный шейдер освещения
-float4 PS(VSOut pin) : SV_TARGET
+PixelOut PS(VSOut pin) : SV_Target
 {
+    LightData light;
+    light.Color = Color;
+    light.FalloffStart = FalloffStart;
+    light.Direction = Direction;
+    light.FalloffEnd = FalloffEnd;
+    light.Position = Position;
+    light.SpotPower = SpotPower;
+    light.type = type;
+    light.Strength = Strength;
+    light.CastsShadows = CastsShadows;
+    light.isDebugOn = isDebugOn;
+    light.gWorld = gWorld;
+    light.LightViewProj = LightViewProj;
+    light.enablePCF = enablePCF;
+    light.pcf_level = pcf_level;
+    
     float2 texelSize = 1.0f / float2(2048, 2048); // Pass these as constants
     
     int2 pix = int2(pin.PosH.xy);
     // Вычитываем G-Buffer
-    float4 albedo = gAlbedoMap.Load(int3(pix, 0));
-    float3 normalW = normalize(gNormalMap.Load(int3(pix, 0)).xyz);
-    float3 posW = gPositionMap.Load(int3(pix, 0)).xyz;
-
+    float4 albedo = gGBuffer0.Load(int3(pix, 0));
+    float3 normalW = normalize(gGBuffer1.Load(int3(pix, 0)).xyz);
+    float3 posW = gGBuffer2.Load(int3(pix, 0)).xyz;
+    float roughness = gGBuffer0.Load(int3(pix, 0)).a; 
+    float3 fresnelR0 = gGBuffer1.Load(int3(pix, 0)).www;  
     float3 toEyeW = normalize(gEyePosW - posW);
 
     // Light terms.
@@ -120,11 +190,11 @@ float4 PS(VSOut pin) : SV_TARGET
 
     Material mat =
     {
-        albedo, float3(0.05, 0.05, 0.05), 0.7
+        albedo, fresnelR0, 1-roughness
     };
     float shadowFactor = 1.0f;
     
-    float4 shadowPosH = mul(float4(posW, 1.0f), light.LightViewProj);
+    float4 shadowPosH = mul(float4(posW, 1.0f), LightViewProj);
     
     shadowPosH.xyz /= shadowPosH.w;
     
@@ -139,19 +209,19 @@ float4 PS(VSOut pin) : SV_TARGET
         shadowFactor = gShadowMap.SampleCmpLevelZero(gsamShadow, shadowTexC, shadowPosH.z - shadowBias);
 
     // For simple Percentage Closer Filtering (PCF 2x2):
-        if (light.enablePCF)
+        if (enablePCF)
         {
             
             float totalFactor = 0.0f;
-            for (float y = -light.pcf_level; y <= light.pcf_level; y += 1.0f)
+            for (float y = -pcf_level; y <= pcf_level; y += 1.0f)
             {
-                for (float x = -light.pcf_level; x <= light.pcf_level; x += 1.0f)
+                for (float x = -pcf_level; x <= pcf_level; x += 1.0f)
                 {
                     float2 offset = float2(x, y) * texelSize;
                     totalFactor += gShadowMap.SampleCmpLevelZero(gsamShadow, shadowTexC + offset, shadowPosH.z - shadowBias);
                 }
             }
-            shadowFactor = totalFactor / ((light.pcf_level * 2 + 1) * (light.pcf_level * 2 + 1));
+            shadowFactor = totalFactor / ((pcf_level * 2 + 1) * (pcf_level * 2 + 1));
         }
         
     
@@ -160,14 +230,19 @@ float4 PS(VSOut pin) : SV_TARGET
     {
         shadowFactor = 1.0f;
     }
-    if (!light.CastsShadows)
+    if (!CastsShadows)
         shadowFactor = 1.0f;
     
     float3 lighting;
-    switch (light.type)
+    switch (type)
     {
         case 0:
-            lighting = light.Strength * light.Color * albedo.rgb;
+            lighting = Strength * Color * albedo.rgb;
+            float3 r = reflect(-toEyeW, normalW);
+            float4 reflectionColor = gCubeMap.Sample(gsamLinearWrap, r);
+            float3 fresnelFactor = SchlickFresnel(fresnelR0, normalW, r);
+            lighting += (1 - roughness) * fresnelFactor * reflectionColor.rgb * Strength * 2;
+            
             break;
         case 1:
             lighting = ComputePointLight(light, mat, posW, normalW, toEyeW);
@@ -177,18 +252,24 @@ float4 PS(VSOut pin) : SV_TARGET
             break;
         case 3:
             lighting = ComputeSpotLight(light, mat, posW, normalW, toEyeW, shadowFactor);
-   
             break;
     }
     
   
     float4 litColor = float4(lighting, 1);
-    // Common convention to take alpha from diffuse albedo.
+    
     litColor.a = albedo.a;
 
-    return litColor;
+    PixelOut pout;
+    pout.BackBuffer = litColor;
+    pout.CurrentFrameTexture = litColor;
+    return pout;
 }
-float4 PS_debug(VSOut pin) : SV_TARGET
+
+PixelOut PS_debug(VSOut pin) 
 {
-    return float4(1, 1, 1, 1);
+    PixelOut pout;
+    pout.BackBuffer = float4(1, 1, 1, 1);
+    pout.CurrentFrameTexture = float4(1, 1, 1, 1);
+    return pout;
 }

@@ -1,26 +1,38 @@
-// GBuffer.hlsl
 
-#include "LightingUtil.hlsl"
-Texture2D gDiffuseMap : register(t0);
-Texture2D gNormalMap : register(t1);
+struct Light
+{
+    float3 Strength;
+    float FalloffStart; // point/spot light only
+    float3 Direction; // directional/spot light only
+    float FalloffEnd; // point/spot light only
+    float3 Position; // point light only
+    float SpotPower; // spot light only
+};
 
-
-SamplerState gsamPointWrap : register(s0);
-SamplerState gsamPointClamp : register(s1);
-SamplerState gsamLinearWrap : register(s2);
-SamplerState gsamLinearClamp : register(s3);
-SamplerState gsamAnisotropicWrap : register(s4);
-SamplerState gsamAnisotropicClamp : register(s5);
-
-// Constant data that varies per frame.
+struct MaterialData
+{
+    float4 DiffuseAlbedo;
+    float3 FresnelR0;
+    float Roughness;
+    float4x4 MatTransform;
+    uint DiffuseMapIndex;
+    uint NormalMapIndex;
+    uint MatPad1;
+    uint MatPad2;
+};
+StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
+Texture2D gTextureMaps[100] : register(t0);
 cbuffer cbPerObject : register(b0)
 {
     float4x4 gWorld;
-    float4x4 gInvWorld;
+    float4x4 gPrevWorld;
     float4x4 gTexTransform;
+    uint gMaterialIndex;
+    uint gObjPad0;
+    uint gObjPad1;
+    uint gObjPad2;
 };
 
-// Constant data that varies per material.
 cbuffer cbPass : register(b1)
 {
     float4x4 gView;
@@ -29,6 +41,7 @@ cbuffer cbPass : register(b1)
     float4x4 gInvProj;
     float4x4 gViewProj;
     float4x4 gInvViewProj;
+    float4x4 gShadowTransform;
     float3 gEyePosW;
     float cbPerObjectPad1;
     float2 gRenderTargetSize;
@@ -38,70 +51,53 @@ cbuffer cbPass : register(b1)
     float gTotalTime;
     float gDeltaTime;
     float4 gAmbientLight;
-
-    // Indices [0, NUM_DIR_LIGHTS) are directional lights;
-    // indices [NUM_DIR_LIGHTS, NUM_DIR_LIGHTS+NUM_POINT_LIGHTS) are point lights;
-    // indices [NUM_DIR_LIGHTS+NUM_POINT_LIGHTS, NUM_DIR_LIGHTS+NUM_POINT_LIGHT+NUM_SPOT_LIGHTS)
-    // are spot lights for a maximum of MaxLights per object.
-    Light gLights[MaxLights];
+    float4x4 gJitteredViewProj;
+    float4x4 prevViewProj;
+    Light gLights[16];
 };
 
-cbuffer cbMaterial : register(b2)
-{
-    float4 gDiffuseAlbedo;
-    float3 gFresnelR0;
-    float gRoughness;
-    float4x4 gMatTransform;
-};
+SamplerState gsamPointWrap : register(s0);
+SamplerState gsamPointClamp : register(s1);
+SamplerState gsamLinearWrap : register(s2);
+SamplerState gsamLinearClamp : register(s3);
+SamplerState gsamAnisotropicWrap : register(s4);
+SamplerState gsamAnisotropicClamp : register(s5);
+SamplerComparisonState gsamShadow : register(s6);
+
+
 
 struct VertexIn
 {
     float3 PosL : POSITION;
     float3 NormalL : NORMAL;
     float2 TexC : TEXCOORD;
-    float3 Tan : TANGENT;
+    float3 TangentU : TANGENT;
 };
 
 struct VertexOut
 {
     float4 PosH : SV_POSITION;
-    float3 PosW : POSITION;
+    float4 ShadowPosH : POSITION0;
+    float3 PosW : POSITION1;
     float3 NormalW : NORMAL;
+    float3 TangentW : TANGENT;
     float2 TexC : TEXCOORD;
-    float3 Tan : TANGENT;
+    float4 PrevPosH : POSITION2;
+    float4 CurPosH : POSITION3;
 };
 
-VertexOut VS(VertexIn vin)
+// Выходная структура Пиксельного Шейдера
+struct PixelOut
 {
-    VertexOut vout = (VertexOut) 0.0f;
-    // Transform to world space.
-    float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
-    vout.PosW = posW;
-
-    vout.PosH = mul(posW, gViewProj);
-    
-    float4 texC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform);
-    vout.TexC = mul(texC, gMatTransform).xy;
-    
-    // Assumes nonuniform scaling; otherwise, need to use inverse-transpose of world matrix.
-    vout.NormalW = mul(vin.NormalL, (float3x3) gWorld);
-    vout.Tan = mul(vin.Tan, (float3x3) gWorld);
-    // Transform to homogeneous clip space.
-
-	// Output vertex attributes for interpolation across triangle.
- 
-    
-    return vout;
-}
-
-// PSOutput с несколькими буферами
-struct PSOutput
-{
-    float4 Albedo : SV_Target0; // Diffuse color
-    float4 Normal : SV_Target1; // Normal.xyz, alpha можно задать =1
-    float4 Position : SV_Target2; // Position.xyz, alpha=1
+    float4 AlbedoRoughness : SV_Target0; // RT0
+    float4 NormalFresnel : SV_Target1; // RT1
+    float4 Position : SV_Target2; // RT2
+    float2 Velocity : SV_Target3;
 };
 
+//---------------------------------------------------------------------------------------
+// Transforms a normal map sample to world space.
+//---------------------------------------------------------------------------------------
 float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW)
 {
 	// Uncompress each component from [0,1] to [-1,1].
@@ -120,26 +116,91 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
     return bumpedNormalW;
 }
 
-PSOutput PS(VertexOut pin)
+
+VertexOut VS(VertexIn vin)
 {
-    PSOutput outt;
-    // Сэмплим диффузную текстуру
-    float4 diffuseTex = gDiffuseMap.Sample(gsamAnisotropicWrap, pin.TexC);
-    outt.Albedo = diffuseTex * gDiffuseAlbedo; // альбедо (RGB), альфа можем взять из diffuseAlbedo.a
-
-    // Обрабатываем нормаль: из карты или вершинная
-    float3 normalW;
-    // Сэмплируем карту нормалей в неликвидном пространстве (0..1 -> -1..1)
-    float3 normalSample = gNormalMap.Sample(gsamAnisotropicWrap, pin.TexC).xyz;
-    pin.NormalW = normalize(pin.NormalW);
-    normalW = NormalSampleToWorldSpace(normalSample.rgb, pin.NormalW, pin.Tan);;
-
-    outt.Normal = float4(normalW, 1.0f);
-
-    // Позиция в мировых координатах
-    outt.Position = float4(pin.PosW, 1.0f);
-
     
+    VertexOut vout = (VertexOut) 0.0f;
+
+	// Fetch the material data.
+    MaterialData matData = gMaterialData[gMaterialIndex];
+	
+    // Transform to world space.
+    float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
+    vout.PosW = posW.xyz;
+    float4 prevPosW = mul(float4(vin.PosL, 1.0f), gPrevWorld);
     
-    return outt;
+    // Assumes nonuniform scaling; otherwise, need to use inverse-transpose of world matrix.
+    vout.NormalW = mul(vin.NormalL, (float3x3) gWorld);
+	
+    vout.TangentW = mul(vin.TangentU, (float3x3) gWorld);
+
+    // Transform to homogeneous clip space.
+    vout.PosH = mul(posW, gJitteredViewProj);
+    vout.PrevPosH = mul(prevPosW, prevViewProj);
+    vout.CurPosH = mul(posW, gViewProj);
+	// Output vertex attributes for interpolation across triangle.
+    float4 texC = mul(float4(vin.TexC, 0.0f, 1.0f), gTexTransform);
+    vout.TexC = mul(texC, matData.MatTransform).xy;
+
+    // Generate projective tex-coords to project shadow map onto scene.
+    vout.ShadowPosH = mul(posW, gShadowTransform);
+	
+    return vout;
 }
+
+
+float2 CalcVelocity(float4 newPos, float4 oldPos)
+{
+    oldPos /= oldPos.w;
+    oldPos.xy = (oldPos.xy + 1) / 2.0f;
+    oldPos.y = 1 - oldPos.y;
+    
+    newPos /= newPos.w;
+    newPos.xy = (newPos.xy + 1) / 2.0f;
+    newPos.y = 1 - newPos.y;
+    
+    return (newPos - oldPos).xy;
+}
+
+
+PixelOut PS(VertexOut pin) : SV_Target
+{
+    PixelOut pout;
+    
+	// Fetch the material data.
+    MaterialData matData = gMaterialData[gMaterialIndex];
+    float4 diffuseAlbedo = matData.DiffuseAlbedo;
+    float3 fresnelR0 = matData.FresnelR0;
+    float roughness = matData.Roughness;
+    uint diffuseMapIndex = matData.DiffuseMapIndex;
+    uint normalMapIndex = matData.NormalMapIndex;
+	
+    // 1. Sample Albedo
+    float4 texColor = gTextureMaps[NonUniformResourceIndex(diffuseMapIndex)].Sample(gsamAnisotropicWrap, pin.TexC);
+    diffuseAlbedo *= texColor;
+    
+#ifdef ALPHA_TEST
+    clip(diffuseAlbedo.a - 0.1f);
+#endif
+
+	// 2. Normal Mapping
+    pin.NormalW = normalize(pin.NormalW);
+    float4 normalMapSample = gTextureMaps[NonUniformResourceIndex(normalMapIndex)].Sample(gsamAnisotropicWrap, pin.TexC);
+    float3 bumpedNormalW = NormalSampleToWorldSpace(normalMapSample.rgb, pin.NormalW, pin.TangentW);
+    // RT0: Цвет (RGB) + Шероховатость (A)
+    pout.AlbedoRoughness = float4(diffuseAlbedo.rgb, roughness);
+
+    // RT1: Нормаль (RGB) + Френель (A) 
+    pout.NormalFresnel = float4(bumpedNormalW, fresnelR0.r);
+
+    // RT2: Мировая позиция (RGB) + Unused
+    pout.Position = float4(pin.PosW, 1.0f);
+
+    
+    pout.Velocity = CalcVelocity(pin.CurPosH, pin.PrevPosH);
+    
+    return pout;
+}
+
+

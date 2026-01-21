@@ -8,7 +8,7 @@ using namespace DirectX;
 
 Camera::Camera()
 {
-	DirectX::XMStoreFloat4(&orientation, DirectX::XMQuaternionIdentity());
+	SetLens(0.25f*MathHelper::Pi, 1.0f, 1.0f, 1000.0f);
 }
 
 Camera::~Camera()
@@ -89,8 +89,8 @@ float Camera::GetFovY()const
 
 float Camera::GetFovX()const
 {
-	float halfWidth = 0.5f * GetNearWindowWidth();
-	return 2.0f * atan(halfWidth / mNearZ);
+	float halfWidth = 0.5f*GetNearWindowWidth();
+	return 2.0f*atan(halfWidth / mNearZ);
 }
 
 float Camera::GetNearWindowWidth()const
@@ -121,12 +121,11 @@ void Camera::SetLens(float fovY, float aspect, float zn, float zf)
 	mNearZ = zn;
 	mFarZ = zf;
 
-	mNearWindowHeight = 2.0f * mNearZ * tanf(0.5f * mFovY);
-	mFarWindowHeight = 2.0f * mFarZ * tanf(0.5f * mFovY);
+	mNearWindowHeight = 2.0f * mNearZ * tanf( 0.5f*mFovY );
+	mFarWindowHeight  = 2.0f * mFarZ * tanf( 0.5f*mFovY );
 
 	XMMATRIX P = XMMatrixPerspectiveFovLH(mFovY, mAspect, mNearZ, mFarZ);
 	XMStoreFloat4x4(&mProj, P);
-	mViewDirty = true;
 }
 
 void Camera::LookAt(FXMVECTOR pos, FXMVECTOR target, FXMVECTOR worldUp)
@@ -179,7 +178,7 @@ XMFLOAT4X4 Camera::GetProj4x4f()const
 
 void Camera::Strafe(float d)
 {
-	//mPosition += d*mRight
+	// mPosition += d*mRight
 	XMVECTOR s = XMVectorReplicate(d);
 	XMVECTOR r = XMLoadFloat3(&mRight);
 	XMVECTOR p = XMLoadFloat3(&mPosition);
@@ -199,90 +198,17 @@ void Camera::Walk(float d)
 	mViewDirty = true;
 }
 
-void Camera::AddSpeed(float alpha) {
-	BaseSpeed += alpha;
-}
-
-float& Camera::GetSpeed() {
-	return this->CurSpeed;
-}
-
-void Camera::SetSpeed(float _speed) {
-	this->CurSpeed = _speed;
-}
-
-void Camera::IncreaseSpeed(float delta)
-{
-	if (CurSpeed + delta > 0 && MaxSpeed - delta > 0)
-	{
-		CurSpeed += delta;
-		BaseSpeed += delta;
-		MaxSpeed += delta;
-	}
-}
-
 void Camera::Pitch(float angle)
 {
 	// Rotate up and look vector about the right vector.
+
 	XMMATRIX R = XMMatrixRotationAxis(XMLoadFloat3(&mRight), angle);
+
+	XMStoreFloat3(&mUp,   XMVector3TransformNormal(XMLoadFloat3(&mUp), R));
 	XMStoreFloat3(&mLook, XMVector3TransformNormal(XMLoadFloat3(&mLook), R));
 
-
-	XMStoreFloat3(&mRight, XMVector3Normalize(XMVector3Cross(XMLoadFloat3(&mUp), XMLoadFloat3(&mLook))));
-	XMStoreFloat3(&mUp, XMVector3Normalize(XMVector3Cross(XMLoadFloat3(&mLook), XMLoadFloat3(&mRight))));
-	UpdateViewMatrix();
-
 	mViewDirty = true;
 }
-void Camera::Yaw(float angle)
-{
-	// Rotate up and look vector about the right vector.
-
-	XMMATRIX R = XMMatrixRotationAxis(XMLoadFloat3(&mUp), angle);
-
-	XMStoreFloat3(&mLook, XMVector3TransformNormal(XMLoadFloat3(&mLook), R));
-
-	XMStoreFloat3(&mRight, XMVector3Normalize(XMVector3Cross(XMLoadFloat3(&mUp), XMLoadFloat3(&mLook))));
-	XMStoreFloat3(&mUp, XMVector3Normalize(XMVector3Cross(XMLoadFloat3(&mLook), XMLoadFloat3(&mRight))));
-	UpdateViewMatrix();
-	mViewDirty = true;
-}
-
-void Camera::YawPitch(float yawDelta, float pitchDelta)
-{
-	// 1. јккумулируем изменени€ углов.
-	mYaw += yawDelta;
-	mPitch += pitchDelta;
-
-	// 2. ќграничиваем угол наклона (pitch) примерно ±89 градусов.
-	float pitchLimit = XM_PIDIV2 - 0.01f; // XM_PIDIV2 = 90 градусов, отступ чуть меньше, чтобы избежать гима.
-	if (mPitch > pitchLimit)
-		mPitch = pitchLimit;
-	if (mPitch < -pitchLimit)
-		mPitch = -pitchLimit;
-
-	// 3. ѕересчитываем ориентацию камеры как кватернион из накопленных углов (без учета крена).
-	XMVECTOR q = XMQuaternionRotationRollPitchYaw(mPitch, mYaw, 0.0f);
-	XMStoreFloat4(&orientation, q);
-
-	// 4. ¬ычисл€ем новый вектор взгл€да.
-	XMVECTOR baseForward = XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f);
-	XMVECTOR newForward = XMVector3Rotate(baseForward, q);
-	newForward = XMVector3Normalize(newForward);
-	XMStoreFloat3(&mLook, newForward);
-
-	// 5. ¬ычисл€ем правый и верхний векторы камеры.
-	XMVECTOR worldUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	XMVECTOR newRight = XMVector3Normalize(XMVector3Cross(worldUp, newForward));
-	XMStoreFloat3(&mRight, newRight);
-	XMVECTOR newUp = XMVector3Normalize(XMVector3Cross(newForward, newRight));
-	XMStoreFloat3(&mUp, newUp);
-
-	mViewDirty = true;
-	// 6. ќбновл€ем матрицу вида.
-	UpdateViewMatrix();
-}
-
 
 void Camera::RotateY(float angle)
 {
@@ -290,34 +216,16 @@ void Camera::RotateY(float angle)
 
 	XMMATRIX R = XMMatrixRotationY(angle);
 
-	XMStoreFloat3(&mRight, XMVector3TransformNormal(XMLoadFloat3(&mRight), R));
+	XMStoreFloat3(&mRight,   XMVector3TransformNormal(XMLoadFloat3(&mRight), R));
 	XMStoreFloat3(&mUp, XMVector3TransformNormal(XMLoadFloat3(&mUp), R));
 	XMStoreFloat3(&mLook, XMVector3TransformNormal(XMLoadFloat3(&mLook), R));
 
 	mViewDirty = true;
 }
-void Camera::RotateX(float angle) {
 
-	XMMATRIX R = XMMatrixRotationX(angle);
-
-	XMStoreFloat3(&mRight, XMVector3TransformNormal(XMLoadFloat3(&mRight), R));
-	XMStoreFloat3(&mUp, XMVector3TransformNormal(XMLoadFloat3(&mUp), R));
-	XMStoreFloat3(&mLook, XMVector3TransformNormal(XMLoadFloat3(&mLook), R));
-
-	mViewDirty = true;
-}
-void Camera::SpeedUp()
-{
-	this->SetSpeed(this->MaxSpeed);
-}
-void Camera::SpeedDown()
-{
-	this->SetSpeed(this->BaseSpeed);
-
-}
 void Camera::UpdateViewMatrix()
 {
-	if (mViewDirty)
+	if(mViewDirty)
 	{
 		XMVECTOR R = XMLoadFloat3(&mRight);
 		XMVECTOR U = XMLoadFloat3(&mUp);
@@ -362,17 +270,6 @@ void Camera::UpdateViewMatrix()
 
 		mViewDirty = false;
 	}
-	UpdateFrustum();
 }
 
-DirectX::BoundingFrustum Camera::GetFrustum() const { return mFrustum; }
 
-void Camera::UpdateFrustum() {
-	XMMATRIX P = GetProj();
-	BoundingFrustum::CreateFromMatrix(mFrustum, P);
-
-	XMMATRIX view = GetView();
-	XMVECTOR det;
-	XMMATRIX invView = XMMatrixInverse(&det, view);
-	mFrustum.Transform(mFrustum, invView);
-}
