@@ -46,7 +46,6 @@ private:
         XMFLOAT4X4 WorldView;
         XMFLOAT4X4 WorldViewProj;
         uint32_t   DrawMeshlets;
-        float Time;
     };
 
     // Pipeline objects.
