@@ -125,11 +125,6 @@ private:
 
     std::unique_ptr<Atmosphere> mAtmosphere;
 
-    // Atmosphere parameters
-    float mSunAngle = 0.5f;  // Radians from horizon
-    float mSunAzimuth = 0.0f;
-    bool mAnimateSun = false;  // Auto-animate sun movement
-    float mSunAnimationSpeed = 0.3f;  // Speed of sun animation
 
     POINT mLastMousePos;
 };
@@ -239,13 +234,8 @@ void AtmosphereApp::Update(const GameTimer& gt)
     OnKeyboardInput(gt);
 
     // Animate sun if enabled
-    if (mAnimateSun)
-    {
-        mSunAzimuth += mSunAnimationSpeed * gt.DeltaTime();
-        if (mSunAzimuth > XM_2PI)
-            mSunAzimuth -= XM_2PI;
-    }
-
+   
+  
     mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
     mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
 
@@ -384,40 +374,12 @@ void AtmosphereApp::OnKeyboardInput(const GameTimer& gt)
     if (GetAsyncKeyState(VK_DOWN) & 0x8000)
         params.DensityMultiplier = max(0.1f, params.DensityMultiplier - 0.5f * dt);
 
-    // Adjust sun angle
-    if (GetAsyncKeyState(VK_LEFT) & 0x8000)
-        mSunAzimuth -= 0.5f * dt;
-    if (GetAsyncKeyState(VK_RIGHT) & 0x8000)
-        mSunAzimuth += 0.5f * dt;
-
     // Adjust exposure
     if (GetAsyncKeyState(VK_OEM_PLUS) & 0x8000)
         params.Exposure = min(10.0f, params.Exposure + 1.0f * dt);
     if (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000)
         params.Exposure = max(0.1f, params.Exposure - 1.0f * dt);
 
-    // Adjust sun elevation with Page Up/Down
-    if (GetAsyncKeyState(VK_PRIOR) & 0x8000)
-        mSunAngle = min(XM_PIDIV2, mSunAngle + 0.3f * dt);
-    if (GetAsyncKeyState(VK_NEXT) & 0x8000)
-        mSunAngle = max(-0.1f, mSunAngle - 0.3f * dt);
-
-    // Toggle sun animation with Space key
-    static bool spaceWasPressed = false;
-    if (GetAsyncKeyState(VK_SPACE) & 0x8000)
-    {
-        if (!spaceWasPressed)
-        {
-            mAnimateSun = !mAnimateSun;
-            spaceWasPressed = true;
-        }
-    }
-    else
-    {
-        spaceWasPressed = false;
-    }
-
-    mCamera.UpdateViewMatrix();
 }
 
 void AtmosphereApp::UpdateObjectCBs(const GameTimer& gt)
@@ -495,11 +457,6 @@ void AtmosphereApp::UpdateMainPassCB(const GameTimer& gt)
     mMainPassCB.DeltaTime = gt.DeltaTime();
     mMainPassCB.AmbientLight = { 0.25f, 0.25f, 0.35f, 1.0f };
 
-    // Sun direction based on angle
-    float sunY = sinf(mSunAngle);
-    float sunXZ = cosf(mSunAngle);
-    mMainPassCB.Lights[0].Direction = { sunXZ * sinf(mSunAzimuth), -sunY, sunXZ * cosf(mSunAzimuth) };
-    mMainPassCB.Lights[0].Strength = { 1.0f, 0.95f, 0.8f };
 
     auto currPassCB = mCurrFrameResource->PassCB.get();
     currPassCB->CopyData(0, mMainPassCB);
@@ -509,11 +466,6 @@ void AtmosphereApp::UpdateAtmosphereCB(const GameTimer& gt)
 {
     auto& params = mAtmosphere->GetParameters();
 
-    // Sun direction
-    float sunY = sinf(mSunAngle);
-    float sunXZ = cosf(mSunAngle);
-    mAtmosphereCB.SunDirection = { sunXZ * sinf(mSunAzimuth), sunY, sunXZ * cosf(mSunAzimuth) };
-    mAtmosphereCB.SunIntensity = params.SunIntensity;
 
     mAtmosphereCB.RayleighScattering = params.RayleighCoefficients;
     mAtmosphereCB.PlanetRadius = params.PlanetRadius;
