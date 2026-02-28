@@ -4,13 +4,11 @@
 
 #include "d3dApp.h"
 #include <WindowsX.h>
-#include "imgui.h"
-#include "imgui_impl_dx12.h"
-#include "imgui_impl_win32.h"
+
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 LRESULT CALLBACK
 MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -28,8 +26,6 @@ D3DApp* D3DApp::GetApp()
 D3DApp::D3DApp(HINSTANCE hInstance)
 :	mhAppInst(hInstance)
 {
-
-
     // Only one D3DApp can be constructed.
     assert(mApp == nullptr);
     mApp = this;
@@ -76,8 +72,9 @@ void D3DApp::Set4xMsaaState(bool value)
 int D3DApp::Run()
 {
 	MSG msg = {0};
-	
+ 
 	mTimer.Reset();
+
 	while(msg.message != WM_QUIT)
 	{
 		// If there are Window messages then process them.
@@ -91,37 +88,11 @@ int D3DApp::Run()
         {	
 			mTimer.Tick();
 
-			if(true )
+			if( !mAppPaused )
 			{
-				if (GetAsyncKeyState('W') & 0x8000)
-				{
-					OnKeyPressed(mTimer, 'W');
-				}
-				if (GetAsyncKeyState('S') & 0x8000)
-				{
-					OnKeyPressed(mTimer, 'S');
-				}
-				if (GetAsyncKeyState('A') & 0x8000)
-				{
-					 OnKeyPressed(mTimer, 'A');
-				}
-				if (GetAsyncKeyState('D') & 0x8000)
-				{
-					 OnKeyPressed(mTimer, 'D');
-				}
-				if (GetAsyncKeyState('E') & 0x8000)
-				{
-					 OnKeyPressed(mTimer, 'E');
-				}
-				if (GetAsyncKeyState('Q') & 0x8000)
-				{
-					 OnKeyPressed(mTimer, 'Q');
-				}
 				CalculateFrameStats();
 				Update(mTimer);	
-                DeferredDraw(mTimer);
-				
-				
+                Draw(mTimer);
 			}
 			else
 			{
@@ -150,7 +121,7 @@ bool D3DApp::Initialize()
 void D3DApp::CreateRtvAndDsvDescriptorHeaps()
 {
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
-    rtvHeapDesc.NumDescriptors = SwapChainBufferCount+3;
+    rtvHeapDesc.NumDescriptors = SwapChainBufferCount;
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	rtvHeapDesc.NodeMask = 0;
@@ -266,8 +237,6 @@ void D3DApp::OnResize()
  
 LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
-		return true;
 	switch( msg )
 	{
 	// WM_ACTIVATE is sent when the window is activated or deactivated.  
@@ -361,9 +330,6 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
  
 	// WM_DESTROY is sent when the window is being destroyed.
 	case WM_DESTROY:
-		ImGui_ImplDX12_Shutdown();
-		ImGui_ImplWin32_Shutdown();
-		ImGui::DestroyContext();
 		PostQuitMessage(0);
 		return 0;
 
@@ -392,23 +358,13 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_MOUSEMOVE:
 		OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
-	case WM_KEYDOWN:
-		if (!(lParam & 0x40000000)) {
-			OnKeyPressed(mTimer, wParam);
-		}
-		return 0;
-	case WM_MOUSEWHEEL:
-		OnKeyPressed(mTimer, wParam);
-		return 0;
     case WM_KEYUP:
-		if (wParam == VK_ESCAPE)
-		{
-			PostQuitMessage(0);
-		}
-		else if ((int)wParam == VK_F2)
-			Set4xMsaaState(!m4xMsaaState);
-		else
-			OnKeyReleased(mTimer, wParam);
+        if(wParam == VK_ESCAPE)
+        {
+            PostQuitMessage(0);
+        }
+        else if((int)wParam == VK_F2)
+            Set4xMsaaState(!m4xMsaaState);
 
         return 0;
 	}
@@ -461,9 +417,9 @@ bool D3DApp::InitDirect3D()
 #if defined(DEBUG) || defined(_DEBUG) 
 	// Enable the D3D12 debug layer.
 {
-	//ComPtr<ID3D12Debug> debugController;
-	//ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
-	//debugController->EnableDebugLayer();
+	ComPtr<ID3D12Debug> debugController;
+	ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
+	debugController->EnableDebugLayer();
 }
 #endif
 
@@ -629,7 +585,7 @@ void D3DApp::CalculateFrameStats()
 	frameCnt++;
 
 	// Compute averages over one second period.
-	if( (mTimer.TotalTime() - timeElapsed) >= 0.1f )
+	if( (mTimer.TotalTime() - timeElapsed) >= 1.0f )
 	{
 		float fps = (float)frameCnt; // fps = frameCnt / 1
 		float mspf = 1000.0f / fps;
@@ -637,16 +593,15 @@ void D3DApp::CalculateFrameStats()
         wstring fpsStr = to_wstring(fps);
         wstring mspfStr = to_wstring(mspf);
 
-		wstring windowText = mMainWndCaption +
-			L"    fps: " + fpsStr +
-			L"   mspf: " + mspfStr +
-			L"  speed: " + GetCamSpeed();
+        wstring windowText = mMainWndCaption +
+            L"    fps: " + fpsStr +
+            L"   mspf: " + mspfStr;
 
         SetWindowText(mhMainWnd, windowText.c_str());
 		
 		// Reset for next average.
 		frameCnt = 0;
-		timeElapsed += 0.1f;
+		timeElapsed += 1.0f;
 	}
 }
 

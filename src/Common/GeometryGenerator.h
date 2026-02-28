@@ -17,9 +17,7 @@
 #include <cstdint>
 #include <DirectXMath.h>
 #include <vector>
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
+
 class GeometryGenerator
 {
 public:
@@ -54,18 +52,12 @@ public:
         DirectX::XMFLOAT3 TangentU;
         DirectX::XMFLOAT2 TexC;
 	};
-	struct Material
-	{
-		std::string name;
-		std::string normFile;
-		std::string diffFile;
-	};
+
 	struct MeshData
 	{
 		std::vector<Vertex> Vertices;
         std::vector<uint32> Indices32;
-		std::string matName;
-		std::string texfile;
+
         std::vector<uint16>& GetIndices16()
         {
 			if(mIndices16.empty())
@@ -117,9 +109,6 @@ public:
 	/// Creates a quad aligned with the screen.  This is useful for postprocessing and screen effects.
 	///</summary>
     MeshData CreateQuad(float x, float y, float w, float h, float depth);
-
-
-	std::vector<GeometryGenerator::MeshData> LoadCustomMesh(const std::string& filename, unsigned int& nMeshes);
 
 private:
 	void Subdivide(MeshData& meshData);

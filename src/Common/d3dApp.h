@@ -27,7 +27,7 @@ protected:
     virtual ~D3DApp();
 
 public:
-	int i = 0;
+
     static D3DApp* GetApp();
     
 	HINSTANCE AppInst()const;
@@ -47,17 +47,11 @@ protected:
 	virtual void OnResize(); 
 	virtual void Update(const GameTimer& gt)=0;
     virtual void Draw(const GameTimer& gt)=0;
-	virtual void DeferredDraw(const GameTimer& gt) = 0;
+
 	// Convenience overrides for handling mouse input.
 	virtual void OnMouseDown(WPARAM btnState, int x, int y){ }
 	virtual void OnMouseUp(WPARAM btnState, int x, int y)  { }
 	virtual void OnMouseMove(WPARAM btnState, int x, int y){ }
-	virtual void MoveBackFwd(float step) {};
-	virtual void MoveLeftRight(float step) {};
-	virtual void MoveUpDown(float step) {};
-	virtual void OnKeyPressed(const GameTimer& gt, WPARAM key) {};
-	virtual void OnKeyReleased(const GameTimer& gt, WPARAM key) {};
-	virtual std::wstring GetCamSpeed() { return L""; };
 
 protected:
 
@@ -65,7 +59,7 @@ protected:
 	bool InitDirect3D();
 	void CreateCommandObjects();
     void CreateSwapChain();
-	virtual void CreateGBuffer() {};
+
 	void FlushCommandQueue();
 
 	ID3D12Resource* CurrentBackBuffer()const;
@@ -128,7 +122,7 @@ protected:
 	D3D_DRIVER_TYPE md3dDriverType = D3D_DRIVER_TYPE_HARDWARE;
     DXGI_FORMAT mBackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-	int mClientWidth = 1280;
-	int mClientHeight = 720;
+	int mClientWidth = 800;
+	int mClientHeight = 600;
 };
 

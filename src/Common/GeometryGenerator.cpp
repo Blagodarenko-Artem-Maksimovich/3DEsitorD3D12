@@ -4,7 +4,7 @@
 
 #include "GeometryGenerator.h"
 #include <algorithm>
-#include <iostream>
+
 using namespace DirectX;
 
 GeometryGenerator::MeshData GeometryGenerator::CreateBox(float width, float height, float depth, uint32 numSubdivisions)
@@ -655,4 +655,3 @@ GeometryGenerator::MeshData GeometryGenerator::CreateQuad(float x, float y, floa
 
     return meshData;
 }
-

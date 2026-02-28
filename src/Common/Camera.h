@@ -65,18 +65,10 @@ public:
 	void Strafe(float d);
 	void Walk(float d);
 
-	void AddSpeed(float alpha);
-	float GetSpeed();
-	void SetSpeed(float _speed);
-	void IncreaseSpeed(float delta);
 	// Rotate the camera.
 	void Pitch(float angle);
-	void Yaw(float angle);
-	void YawPitch(float Yaw,float Pitch);
 	void RotateY(float angle);
-	void RotateX(float angle);
-	void SpeedUp();
-	void SpeedDown();
+
 	// After modifying camera position/orientation, call to rebuild the view matrix.
 	void UpdateViewMatrix();
 
@@ -87,10 +79,8 @@ private:
 	DirectX::XMFLOAT3 mRight = { 1.0f, 0.0f, 0.0f };
 	DirectX::XMFLOAT3 mUp = { 0.0f, 1.0f, 0.0f };
 	DirectX::XMFLOAT3 mLook = { 0.0f, 0.0f, 1.0f };
-	DirectX::XMFLOAT4 orientation;
+
 	// Cache frustum properties.
-	float mYaw = 0.0f;
-	float mPitch = 0.0f;
 	float mNearZ = 0.0f;
 	float mFarZ = 0.0f;
 	float mAspect = 0.0f;
@@ -98,9 +88,6 @@ private:
 	float mNearWindowHeight = 0.0f;
 	float mFarWindowHeight = 0.0f;
 
-	float CurSpeed = 0.3f;
-	float BaseSpeed = 0.3f;
-	float MaxSpeed = 0.9f;
 	bool mViewDirty = true;
 
 	// Cache View/Proj matrices.
