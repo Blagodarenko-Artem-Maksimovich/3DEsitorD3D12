@@ -1,0 +1,41 @@
+
+──────────────────────────────────────────────────────────────────────────────────────────  GAEA BUILD SWARM  2.2.1.0 ──
+
+                                                                                           
+          Filename:  │ C:/Study/ComputerGraphics/2course/5semestr/terrain_lecture.terrain  
+    Build Location:  │ C:\Study\ComputerGraphics\2course\terrain_lecture\003               
+        Build Type:  │ Standard                                                            
+  Build Resolution:  │ 512 × 512                                                           
+     Build Profile:  │ None / Last Saved Settings                                          
+             Nodes:  │ 13 to build                                                         
+                     │ 06 to export                                                        
+                                                                                           
+
+──────────────────────────────────────────────────────────────────────────────────────────  GAEA BUILD SWARM  2.2.1.0 ──
+
+                                                                                           
+          Filename:  │ C:/Study/ComputerGraphics/2course/5semestr/terrain_lecture.terrain  
+    Build Location:  │ C:\Study\ComputerGraphics\2course\terrain_lecture\003               
+        Build Type:  │ Standard                                                            
+  Build Resolution:  │ 512 × 512                                                           
+     Build Profile:  │ None / Last Saved Settings                                          
+             Nodes:  │ 13 to build                                                         
+                     │ 06 to export                                                        
+                                                                                           
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────── Build Report ──
+
+              Build Results                               Statistics                
+                                                                                    
+          Result: │ Success                  MultiFractal │ 0:00:00.18              
+      Resolution: │ 512                          Erosion2 │ 0:00:00.365             
+      Node Count: │ 13                         Weathering │ 0:00:00.72              
+      Start Time: │ 11/28/2025 02:43:23      ColorErosion │ 0:00:00.885             
+        End Time: │ 11/28/2025 02:43:38          Erosion2 │ 0:00:00.156             
+        Duration: │ 00:00:15.3219381             Outcrops │ 0:00:01.463             
+  Non-Build Time: │ 00:00:10.1939381                Scree │ 0:00:01.285             
+                                                          │                         
+                                                  Fastest │ Mesher @ 0:00:00        
+                                                  Slowest │ Outcrops @ 0:00:01.463  
+                                                                                    
+                                            * nodes that took <100ms are excluded.  
