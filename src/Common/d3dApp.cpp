@@ -4,11 +4,13 @@
 
 #include "d3dApp.h"
 #include <WindowsX.h>
-
+#include "imgui.h"
+#include "imgui_impl_dx12.h"
+#include "imgui_impl_win32.h"
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
-
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK
 MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -26,6 +28,8 @@ D3DApp* D3DApp::GetApp()
 D3DApp::D3DApp(HINSTANCE hInstance)
 :	mhAppInst(hInstance)
 {
+
+
     // Only one D3DApp can be constructed.
     assert(mApp == nullptr);
     mApp = this;
@@ -72,9 +76,8 @@ void D3DApp::Set4xMsaaState(bool value)
 int D3DApp::Run()
 {
 	MSG msg = {0};
- 
+	
 	mTimer.Reset();
-
 	while(msg.message != WM_QUIT)
 	{
 		// If there are Window messages then process them.
@@ -88,11 +91,37 @@ int D3DApp::Run()
         {	
 			mTimer.Tick();
 
-			if( !mAppPaused )
+			if(!mAppPaused)
 			{
+				if (GetAsyncKeyState('W') & 0x8000)
+				{
+					OnKeyPressed(mTimer, 'W');
+				}
+				if (GetAsyncKeyState('S') & 0x8000)
+				{
+					OnKeyPressed(mTimer, 'S');
+				}
+				if (GetAsyncKeyState('A') & 0x8000)
+				{
+					 OnKeyPressed(mTimer, 'A');
+				}
+				if (GetAsyncKeyState('D') & 0x8000)
+				{
+					 OnKeyPressed(mTimer, 'D');
+				}
+				if (GetAsyncKeyState('E') & 0x8000)
+				{
+					 OnKeyPressed(mTimer, 'E');
+				}
+				if (GetAsyncKeyState('Q') & 0x8000)
+				{
+					 OnKeyPressed(mTimer, 'Q');
+				}
 				CalculateFrameStats();
 				Update(mTimer);	
-                Draw(mTimer);
+                DeferredDraw(mTimer);
+				
+				
 			}
 			else
 			{
@@ -120,23 +149,30 @@ bool D3DApp::Initialize()
  
 void D3DApp::CreateRtvAndDsvDescriptorHeaps()
 {
-    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
-    rtvHeapDesc.NumDescriptors = SwapChainBufferCount;
-    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
+	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	rtvHeapDesc.NodeMask = 0;
-    ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
-        &rtvHeapDesc, IID_PPV_ARGS(mRtvHeap.GetAddressOf())));
 
+	const UINT kGBufferRTVs = 4;  // Albedo, Normal, Position, Velocity
+	const UINT kSceneRTVs = 1;  // SceneTexture
+	const UINT kTaaRTVs = 2;  // History ping-pong
 
-    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
-    dsvHeapDesc.NumDescriptors = 1;
-    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + kGBufferRTVs + kSceneRTVs + kTaaRTVs;
+
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
+		&rtvHeapDesc, IID_PPV_ARGS(mRtvHeap.GetAddressOf())));
+
+	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+	dsvHeapDesc.NumDescriptors = 1;
+	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	dsvHeapDesc.NodeMask = 0;
-    ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
-        &dsvHeapDesc, IID_PPV_ARGS(mDsvHeap.GetAddressOf())));
+
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(
+		&dsvHeapDesc, IID_PPV_ARGS(mDsvHeap.GetAddressOf())));
 }
+
 
 void D3DApp::OnResize()
 {
@@ -187,8 +223,8 @@ void D3DApp::OnResize()
 	// we need to create the depth buffer resource with a typeless format.  
 	depthStencilDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
 
-    depthStencilDesc.SampleDesc.Count = m4xMsaaState ? 4 : 1;
-    depthStencilDesc.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
+    depthStencilDesc.SampleDesc.Count = 1;
+    depthStencilDesc.SampleDesc.Quality = 0;
     depthStencilDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     depthStencilDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
@@ -237,6 +273,8 @@ void D3DApp::OnResize()
  
 LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+		return true;
 	switch( msg )
 	{
 	// WM_ACTIVATE is sent when the window is activated or deactivated.  
@@ -330,6 +368,9 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
  
 	// WM_DESTROY is sent when the window is being destroyed.
 	case WM_DESTROY:
+		ImGui_ImplDX12_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext();
 		PostQuitMessage(0);
 		return 0;
 
@@ -358,13 +399,23 @@ LRESULT D3DApp::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_MOUSEMOVE:
 		OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
+	case WM_KEYDOWN:
+		if (!(lParam & 0x40000000)) {
+			OnKeyPressed(mTimer, wParam);
+		}
+		return 0;
+	case WM_MOUSEWHEEL:
+		OnKeyPressed(mTimer, wParam);
+		return 0;
     case WM_KEYUP:
-        if(wParam == VK_ESCAPE)
-        {
-            PostQuitMessage(0);
-        }
-        else if((int)wParam == VK_F2)
-            Set4xMsaaState(!m4xMsaaState);
+		if (wParam == VK_ESCAPE)
+		{
+			PostQuitMessage(0);
+		}
+		else if ((int)wParam == VK_F2)
+			Set4xMsaaState(!m4xMsaaState);
+		else
+			OnKeyReleased(mTimer, wParam);
 
         return 0;
 	}
@@ -575,33 +626,34 @@ D3D12_CPU_DESCRIPTOR_HANDLE D3DApp::DepthStencilView()const
 
 void D3DApp::CalculateFrameStats()
 {
-	// Code computes the average frames per second, and also the 
-	// average time it takes to render one frame.  These stats 
-	// are appended to the window caption bar.
-    
+	// Считаем количество кадров и время
 	static int frameCnt = 0;
 	static float timeElapsed = 0.0f;
 
 	frameCnt++;
 
-	// Compute averages over one second period.
-	if( (mTimer.TotalTime() - timeElapsed) >= 1.0f )
+	float totalTime = mTimer.TotalTime();
+	float deltaTime = totalTime - timeElapsed;
+
+	// Обновляем статистику раз в секунду
+	if (deltaTime >= 1.0f)
 	{
-		float fps = (float)frameCnt; // fps = frameCnt / 1
+		// FPS = кол-во кадров / прошедшее время (в секундах)
+		float fps = frameCnt / deltaTime;
+		// mspf = миллисекунд на кадр
 		float mspf = 1000.0f / fps;
 
-        wstring fpsStr = to_wstring(fps);
-        wstring mspfStr = to_wstring(mspf);
+		// Приводим к строке с нужной точностью (целые fps, одно десятичное для mspf)
+		wchar_t buf[64];
+		swprintf(buf, 64, L"%d fps   %.1f mspf", static_cast<int>(fps), mspf);
 
-        wstring windowText = mMainWndCaption +
-            L"    fps: " + fpsStr +
-            L"   mspf: " + mspfStr;
+		// Строка заголовка
+		std::wstring windowText = mMainWndCaption + L"    " + buf + L"   speed: " + GetCamSpeed();
+		SetWindowText(mhMainWnd, windowText.c_str());
 
-        SetWindowText(mhMainWnd, windowText.c_str());
-		
-		// Reset for next average.
+		// Сбрасываем счётчики
 		frameCnt = 0;
-		timeElapsed += 1.0f;
+		timeElapsed += deltaTime;   // или: timeElapsed = totalTime;
 	}
 }
 

@@ -17,7 +17,9 @@
 #include <cstdint>
 #include <DirectXMath.h>
 #include <vector>
-
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 class GeometryGenerator
 {
 public:
@@ -25,41 +27,45 @@ public:
     using uint16 = std::uint16_t;
     using uint32 = std::uint32_t;
 
-    struct Vertex
-    {
-        Vertex() : Position(0, 0, 0), Normal(0, 0, 0), TangentU(0, 0, 0), TexC(0, 0) {}
+	struct Vertex
+	{
+		Vertex(){}
         Vertex(
-            const DirectX::XMFLOAT3& p,
-            const DirectX::XMFLOAT3& n,
-            const DirectX::XMFLOAT3& t,
+            const DirectX::XMFLOAT3& p, 
+            const DirectX::XMFLOAT3& n, 
+            const DirectX::XMFLOAT3& t, 
             const DirectX::XMFLOAT2& uv) :
-            Position(p),
-            Normal(n),
-            TangentU(t),
-            TexC(uv) {
-        }
-        Vertex(
-            float px, float py, float pz,
-            float nx, float ny, float nz,
-            float tx, float ty, float tz,
-            float u, float v) :
-            Position(px, py, pz),
-            Normal(nx, ny, nz),
-            TangentU(tx, ty, tz),
-            TexC(u, v) {
-        }
+            Position(p), 
+            Normal(n), 
+            TangentU(t), 
+            TexC(uv){}
+		Vertex(
+			float px, float py, float pz, 
+			float nx, float ny, float nz,
+			float tx, float ty, float tz,
+			float u, float v) : 
+            Position(px,py,pz), 
+            Normal(nx,ny,nz),
+			TangentU(tx, ty, tz), 
+            TexC(u,v){}
 
         DirectX::XMFLOAT3 Position;
         DirectX::XMFLOAT3 Normal;
         DirectX::XMFLOAT3 TangentU;
         DirectX::XMFLOAT2 TexC;
-    };
-
+	};
+	struct Material
+	{
+		std::string name;
+		std::string normFile;
+		std::string diffFile;
+	};
 	struct MeshData
 	{
 		std::vector<Vertex> Vertices;
         std::vector<uint32> Indices32;
-
+		std::string matName;
+		std::string texfile;
         std::vector<uint16>& GetIndices16()
         {
 			if(mIndices16.empty())
@@ -111,6 +117,9 @@ public:
 	/// Creates a quad aligned with the screen.  This is useful for postprocessing and screen effects.
 	///</summary>
     MeshData CreateQuad(float x, float y, float w, float h, float depth);
+
+
+	std::vector<GeometryGenerator::MeshData> LoadCustomMesh(const std::string& filename, unsigned int& nMeshes);
 
 private:
 	void Subdivide(MeshData& meshData);

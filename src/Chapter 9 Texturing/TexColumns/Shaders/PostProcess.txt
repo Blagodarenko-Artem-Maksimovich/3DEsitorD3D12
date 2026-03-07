@@ -1,0 +1,100 @@
+// ChromaticAberration.hlsl
+
+Texture2D gSceneTexture : register(t0); // The input scene texture
+Texture2D gLutTexture : register(t1); // The input scene texture
+SamplerState gsamLinearClamp : register(s0); // Sampler
+
+cbuffer cbPostProcess : register(b0)
+{
+    float gChromaticAberrationOffset;
+    // Add other parameters if needed, e.g., float2 gScreenDimensions;
+};
+
+struct VSOut
+{
+    float4 PosH : SV_POSITION;
+    float2 TexC : TEXCOORD;
+};
+
+
+float3 ApplyLUT(float3 color, Texture2D lutTex)
+{
+    
+    int redcoeff = lerp(0, 31, color.r);
+    int greencoeff = lerp(0, 31, color.g);
+    int bluecoeff = lerp(0, 31, color.b);
+    float2 uv = float2(bluecoeff * 32 + redcoeff, greencoeff);
+    uv.x /= 1024;
+    uv.y /= 32;
+    // Размер плитки и текстуры
+    const float size = 32.0;
+    const float texW = 1024.0; // 32 * 32
+    const float texH = 32.0;
+
+    // 1) Ограничиваем [0,1]
+    float3 c = saturate(color);
+
+    // 2) Индексы в [0..31], округляем до ближайшего
+    float r_idx = round(c.r * (size - 1.0));
+    float g_idx = round(c.g * (size - 1.0));
+    float b_idx = round(c.b * (size - 1.0)); // slice
+
+    // 3) Пиксельные координаты
+    float x_pix = b_idx * size + r_idx; // slice*32 + r
+    float y_pix = g_idx; // g
+
+    // 4) Точечное смещение к центру пикселя
+    float u = (x_pix + 0.5) / texW;
+    float v = 1.0 - ((y_pix + 0.5) / texH);
+
+    // 5) Сэмплируем
+    // Т.к. мы попадаем строго в центр пикселя, любой linear/clamp тот же результат
+    return lutTex.Sample(gsamLinearClamp, uv).rgb;
+}
+
+
+
+
+
+
+
+// Vertex shader for a full-screen triangle (re-use or adapt from LightingPass.hlsl)
+VSOut VS(uint vid : SV_VertexID)
+{
+    VSOut output;
+    // Full-screen triangle vertices
+    float2 positions[3] =
+    {
+        float2(-1.0f, -1.0f),
+        float2(-1.0f, 3.0f),
+        float2(3.0f, -1.0f)
+    };
+    output.PosH = float4(positions[vid], 0.0f, 1.0f);
+    // Generate texture coordinates to cover the full screen
+    output.TexC = float2((output.PosH.x + 1.0f) * 0.5f, (1.0f - output.PosH.y) * 0.5f);
+    return output;
+}
+
+float4 PS(VSOut pin) : SV_TARGET
+{
+    float2 texCoord = pin.TexC;
+    float2 texC_H = float2(pin.TexC.x * 2 - 1, pin.TexC.y * 2 - 1);
+    // Calculate offsets for R and B channels
+    // The gChromaticAberrationOffset could be a small value like 0.001 to 0.01
+    float alpha = (abs(texC_H.x) + abs(texC_H.y)) / 2;
+    float2 offsetR = float2(lerp(0, gChromaticAberrationOffset, alpha), 0.0f);
+    float2 offsetB = float2(-lerp(0, gChromaticAberrationOffset, alpha), 0.0f);
+    // You can also make offsets vertical or in other directions:
+    // float2 offsetR = float2(gChromaticAberrationOffset, gChromaticAberrationOffset);
+    // float2 offsetB = float2(-gChromaticAberrationOffset, -gChromaticAberrationOffset);
+
+
+    float r = gSceneTexture.Sample(gsamLinearClamp, texCoord + offsetR).r;
+    float g = gSceneTexture.Sample(gsamLinearClamp, texCoord).g;
+    float b = gSceneTexture.Sample(gsamLinearClamp, texCoord + offsetB).b;
+    float a = gSceneTexture.Sample(gsamLinearClamp, texCoord).a; // Or albedo.a from your gbuffer if more appropriate
+    float4 color = float4(r, g, b, a);
+    float3 red = float3(0, 0, 1);
+    color.rgb = ApplyLUT(color, gLutTexture);
+    return color;
+}

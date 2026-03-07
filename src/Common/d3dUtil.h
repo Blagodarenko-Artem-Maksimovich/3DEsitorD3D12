@@ -28,6 +28,7 @@
 #include "d3dx12.h"
 #include "DDSTextureLoader.h"
 #include "MathHelper.h"
+#include "GeometryGenerator.h"
 
 extern const int gNumFrameResources;
 
@@ -183,6 +184,7 @@ struct MeshGeometry
 	// Use this container to define the Submesh geometries so we can draw
 	// the Submeshes individually.
 	std::unordered_map<std::string, SubmeshGeometry> DrawArgs;
+	std::unordered_map<std::string, std::vector<std::pair<GeometryGenerator::MeshData,SubmeshGeometry>>> MultiDrawArgs;
 
 	D3D12_VERTEX_BUFFER_VIEW VertexBufferView()const
 	{
@@ -214,12 +216,42 @@ struct MeshGeometry
 
 struct Light
 {
-    DirectX::XMFLOAT3 Strength = { 0.5f, 0.5f, 0.5f };
+    DirectX::XMFLOAT3 Color = { 0.5f, 0.5f, 0.5f };
     float FalloffStart = 1.0f;                          // point/spot light only
     DirectX::XMFLOAT3 Direction = { 0.0f, -1.0f, 0.0f };// directional/spot light only
     float FalloffEnd = 10.0f;                           // point/spot light only
     DirectX::XMFLOAT3 Position = { 0.0f, 0.0f, 0.0f };  // point/spot light only
     float SpotPower = 64.0f;                            // spot light only
+    int type = 0;
+    float Strength = 1;
+    int CastsShadows = true;
+    int isDebugOn = 0;
+    DirectX::XMFLOAT4X4 gWorld;
+    // --- New Shadow Properties ---
+    DirectX::XMFLOAT4X4 LightViewProj = MathHelper::Identity4x4();
+    int enablePCF = 0;
+    int pcf_level = 1;
+    float ShadowSoftness = 4.0f;  /* radius in shadow texels for soft cone; 0 = hard; required for PBRLightingPass */
+    DirectX::XMFLOAT4X4 LightView = MathHelper::Identity4x4();
+    DirectX::XMFLOAT4X4 LightProj = MathHelper::Identity4x4();
+    // Store the combined LightView * LightProj matrix for sending to shaders
+
+    // Index to the SRV for this light's shadow map in the descriptor heap
+    // This will be an offset from the start of shadow map SRVs or a global index.
+    UINT ShadowMapSrvHeapIndex = 0;
+    // Handle to the DSV for this light's shadow map
+    CD3DX12_CPU_DESCRIPTOR_HANDLE ShadowMapDsvHandle;
+
+    // We'll also need the resource itself
+    Microsoft::WRL::ComPtr<ID3D12Resource> ShadowMap = nullptr;
+    // Viewport for rendering to this shadow map
+    D3D12_VIEWPORT ShadowViewport;
+    D3D12_RECT ShadowScissorRect;
+    DirectX::XMFLOAT3 Rotation = { 0.f, 0.f, 0.f };
+    DirectX::XMVECTOR LightUp = { 0.f, 0.f, 0.f };
+    float empty = 1.0f;
+    int LightCBIndex;
+    SubmeshGeometry ShapeGeo;
 };
 
 #define MaxLights 16
@@ -229,6 +261,8 @@ struct MaterialConstants
 	DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
 	DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
 	float Roughness = 0.25f;
+	float Metallic = 0.0f;
+	DirectX::XMFLOAT3 _padMetallic = { 0.0f, 0.0f, 0.0f };
 
 	// Used in texture mapping.
 	DirectX::XMFLOAT4X4 MatTransform = MathHelper::Identity4x4();
@@ -260,6 +294,7 @@ struct Material
 	DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
 	DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
 	float Roughness = .25f;
+	float Metallic = 0.0f;
 	DirectX::XMFLOAT4X4 MatTransform = MathHelper::Identity4x4();
 };
 
@@ -272,6 +307,19 @@ struct Texture
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> Resource = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12Resource> UploadHeap = nullptr;
+};
+
+// Atmosphere (real-time params: clean vs dirty, sun) — used by lighting/sky pass
+// Rayleigh/Mie in 0..1 (artist range). Turbidity 1=clear, 2+=hazy.
+struct AtmosphereConstants
+{
+	DirectX::XMFLOAT3 SunDirection = { 0.2f, -0.95f, 0.2f };
+	float SunStrength = 5.0f;
+	float Rayleigh = 0.8f;   // 0..1: blue/clean sky strength
+	float Mie = 0.15f;    // 0..1: haze/aerosols
+	float Turbidity = 1.0f;     // 1 = clear, 2+ = dirty/hazy
+	float BlendWithCubemap = 0.0f; // 0 = atmosphere only, 1 = cubemap only
+	DirectX::XMFLOAT2 _padAtmosphere = { 0, 0 };
 };
 
 #ifndef ThrowIfFailed

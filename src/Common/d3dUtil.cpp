@@ -13,6 +13,20 @@ DxException::DxException(HRESULT hr, const std::wstring& functionName, const std
 {
 }
 
+std::string d3dUtil::ToString(HRESULT hr)
+{
+    _com_error err(hr);
+    std::wstring wmsg = err.ErrorMessage();
+
+    char msg[512] = {};
+    int len = WideCharToMultiByte(CP_UTF8, 0, wmsg.c_str(), -1, msg, (int)sizeof(msg), nullptr, nullptr);
+    std::string s = (len > 0) ? std::string(msg) : std::string("Unknown error");
+
+    char hex[32] = {};
+    sprintf_s(hex, "0x%08X", (unsigned)hr);
+    return std::string(hex) + " (" + s + ")";
+}
+
 bool d3dUtil::IsKeyDown(int vkeyCode)
 {
     return (GetAsyncKeyState(vkeyCode) & 0x8000) != 0;
