@@ -50,6 +50,9 @@ private:
     void CreateFrameResources();
 
     void RenderTerrainPatches();
+    bool RayTerrainIntersect(int mouseX, int mouseY, XMFLOAT3& hitPoint);
+    void PaintOnTerrain(const XMFLOAT3& worldPos);
+    void UpdatePaintTexture();
 
     void ComputeFrustumEdges(XMFLOAT4* pDest, const XMMATRIX& viewProj);
     std::array<const CD3DX12_STATIC_SAMPLER_DESC, 2> GetStaticSamplerConfigs();
@@ -81,6 +84,10 @@ private:
     ComPtr<ID3D12Resource> m_fallbackWhite;
     ComPtr<ID3D12Resource> m_fallbackWhiteUpload;
 
+    ComPtr<ID3D12Resource> m_paintTexture;
+    ComPtr<ID3D12Resource> m_paintUploadBuffer;
+    std::vector<UINT> m_paintData;
+
     PassConstants m_frameConstants = {};
     TerrainConstants m_terrainParameters = {};
     Camera m_viewCamera;
@@ -89,6 +96,10 @@ private:
 
     bool m_terrainActive = true;
     bool m_wireframeEnabled = false;
+    bool m_isPainting = false;
+    bool m_paintTextureNeedsUpdate = false;
+    float m_brushSize = 30.0f;
+    XMFLOAT3 m_paintColor = { 1.0f, 0.0f, 0.0f };
 
     std::vector<float> m_lodThresholds = { 100.0f, 200.0f, 400.0f, 600.0f, 1000.0f };
 
@@ -117,7 +128,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, in
 
 TerrainApp::TerrainApp(HINSTANCE hInstance) : D3DApp(hInstance)
 {
-    mMainWndCaption = L"Terrain Visualization System";
+    mMainWndCaption = L"Terrain Painting System";
 }
 
 TerrainApp::~TerrainApp()
@@ -230,6 +241,24 @@ void TerrainApp::Draw(const GameTimer& gt)
     mCommandList->Reset(allocator.Get(),
         m_wireframeEnabled ? m_pipelineObjects["terrain_wireframe"].Get() : m_pipelineObjects["terrain"].Get());
 
+    if (m_paintTextureNeedsUpdate)
+    {
+        mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_paintTexture.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST));
+
+        D3D12_SUBRESOURCE_DATA paintData = {};
+        paintData.pData = m_paintData.data();
+        paintData.RowPitch = 512 * 4;
+        paintData.SlicePitch = paintData.RowPitch * 512;
+
+        UpdateSubresources(mCommandList.Get(), m_paintTexture.Get(), m_paintUploadBuffer.Get(), 0, 0, 1, &paintData);
+
+        mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+            m_paintTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+        m_paintTextureNeedsUpdate = false;
+    }
+
     mCommandList->RSSetViewports(1, &mScreenViewport);
     mCommandList->RSSetScissorRects(1, &mScissorRect);
 
@@ -305,21 +334,179 @@ void TerrainApp::RenderTerrainPatches()
     }
 }
 
+bool TerrainApp::RayTerrainIntersect(int mouseX, int mouseY, XMFLOAT3& hitPoint)
+{
+    float ndcX = (2.0f * mouseX) / mClientWidth - 1.0f;
+    float ndcY = 1.0f - (2.0f * mouseY) / mClientHeight;
+
+    XMMATRIX view = m_viewCamera.GetView();
+    XMMATRIX proj = m_viewCamera.GetProj();
+    XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+    XMMATRIX invViewProj = XMMatrixInverse(&XMMatrixDeterminant(viewProj), viewProj);
+
+    XMVECTOR nearPoint = XMVector3TransformCoord(XMVectorSet(ndcX, ndcY, 0.0f, 1.0f), invViewProj);
+    XMVECTOR farPoint = XMVector3TransformCoord(XMVectorSet(ndcX, ndcY, 1.0f, 1.0f), invViewProj);
+    XMVECTOR rayDir = XMVector3Normalize(XMVectorSubtract(farPoint, nearPoint));
+
+    XMFLOAT3 rayStart, rayDirection;
+    XMStoreFloat3(&rayStart, nearPoint);
+    XMStoreFloat3(&rayDirection, rayDir);
+
+    float terrainSize = m_terrainSystem->GetTerrainSize();
+    float halfSize = terrainSize * 0.5f;
+
+    float lastT = 0.0f;
+    for (float t = 1.0f; t < 3000.0f; t += 1.0f)
+    {
+        XMFLOAT3 testPoint = {
+            rayStart.x + rayDirection.x * t,
+            rayStart.y + rayDirection.y * t,
+            rayStart.z + rayDirection.z * t
+        };
+
+        if (testPoint.x >= -halfSize && testPoint.x <= halfSize &&
+            testPoint.z >= -halfSize && testPoint.z <= halfSize)
+        {
+            float terrainHeight = m_terrainSystem->GetHeight(testPoint.x, testPoint.z);
+
+            if (testPoint.y <= terrainHeight)
+            {
+                float lo = lastT, hi = t;
+                for (int i = 0; i < 16; ++i)
+                {
+                    float mid = (lo + hi) * 0.5f;
+                    XMFLOAT3 midPoint = {
+                        rayStart.x + rayDirection.x * mid,
+                        rayStart.y + rayDirection.y * mid,
+                        rayStart.z + rayDirection.z * mid
+                    };
+                    float midHeight = m_terrainSystem->GetHeight(midPoint.x, midPoint.z);
+                    if (midPoint.y <= midHeight)
+                        hi = mid;
+                    else
+                        lo = mid;
+                }
+
+                float finalT = (lo + hi) * 0.5f;
+                hitPoint = {
+                    rayStart.x + rayDirection.x * finalT,
+                    m_terrainSystem->GetHeight(rayStart.x + rayDirection.x * finalT, rayStart.z + rayDirection.z * finalT),
+                    rayStart.z + rayDirection.z * finalT
+                };
+                return true;
+            }
+        }
+        lastT = t;
+    }
+
+    return false;
+}
+
+void TerrainApp::PaintOnTerrain(const XMFLOAT3& worldPos)
+{
+    float terrainSize = m_terrainSystem->GetTerrainSize();
+    float halfSize = terrainSize * 0.5f;
+
+    float u = (worldPos.x + halfSize) / terrainSize;
+    float v = (worldPos.z + halfSize) / terrainSize;
+
+    u = max(0.0f, min(1.0f, u));
+    v = max(0.0f, min(1.0f, v));
+
+    int paintWidth = 512;
+    int paintHeight = 512;
+    int centerX = (int)(u * (paintWidth - 1));
+    int centerY = (int)(v * (paintHeight - 1));
+
+    int brushRadius = max(2, (int)(m_brushSize * paintWidth / terrainSize));
+
+    for (int y = centerY - brushRadius; y <= centerY + brushRadius; ++y)
+    {
+        for (int x = centerX - brushRadius; x <= centerX + brushRadius; ++x)
+        {
+            if (x >= 0 && x < paintWidth && y >= 0 && y < paintHeight)
+            {
+                float dx = (float)(x - centerX);
+                float dy = (float)(y - centerY);
+                float distance = sqrtf(dx * dx + dy * dy);
+
+                if (distance <= (float)brushRadius)
+                {
+                    float alpha = 1.0f - (distance / (float)brushRadius);
+                    alpha = alpha * alpha;
+
+                    int index = y * paintWidth + x;
+                    UINT& pixel = m_paintData[index];
+
+                    float currentR = ((pixel >> 0) & 0xFF) / 255.0f;
+                    float currentG = ((pixel >> 8) & 0xFF) / 255.0f;
+                    float currentB = ((pixel >> 16) & 0xFF) / 255.0f;
+                    float currentA = ((pixel >> 24) & 0xFF) / 255.0f;
+
+                    float blendAlpha = alpha * 0.5f;
+                    float newR = currentR * (1.0f - blendAlpha) + m_paintColor.x * blendAlpha;
+                    float newG = currentG * (1.0f - blendAlpha) + m_paintColor.y * blendAlpha;
+                    float newB = currentB * (1.0f - blendAlpha) + m_paintColor.z * blendAlpha;
+                    float newA = min(currentA + blendAlpha, 1.0f);
+
+                    UINT r = (UINT)(newR * 255.0f);
+                    UINT g = (UINT)(newG * 255.0f);
+                    UINT b = (UINT)(newB * 255.0f);
+                    UINT a = (UINT)(newA * 255.0f);
+
+                    pixel = (a << 24) | (b << 16) | (g << 8) | r;
+                }
+            }
+        }
+    }
+
+    m_paintTextureNeedsUpdate = true;
+}
+
+void TerrainApp::UpdatePaintTexture()
+{
+    m_paintTextureNeedsUpdate = true;
+}
+
 void TerrainApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
     m_lastCursorPosition.x = x;
     m_lastCursorPosition.y = y;
+
+    if ((btnState & MK_LBUTTON) != 0)
+    {
+        m_isPainting = true;
+        XMFLOAT3 hitPoint;
+        if (RayTerrainIntersect(x, y, hitPoint))
+        {
+            PaintOnTerrain(hitPoint);
+        }
+    }
+
     SetCapture(mhMainWnd);
 }
 
 void TerrainApp::OnMouseUp(WPARAM btnState, int x, int y)
 {
+    if (m_isPainting)
+    {
+        m_isPainting = false;
+    }
     ReleaseCapture();
 }
 
 void TerrainApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
-    if ((btnState & MK_LBUTTON) != 0)
+    if ((btnState & MK_LBUTTON) != 0 && m_isPainting)
+    {
+        XMFLOAT3 hitPoint;
+        if (RayTerrainIntersect(x, y, hitPoint))
+        {
+            PaintOnTerrain(hitPoint);
+        }
+    }
+
+    if ((btnState & MK_RBUTTON) != 0)
     {
         float dx = XMConvertToRadians(0.25f * static_cast<float>(x - m_lastCursorPosition.x));
         float dy = XMConvertToRadians(0.25f * static_cast<float>(y - m_lastCursorPosition.y));
@@ -369,6 +556,30 @@ void TerrainApp::ProcessInput(const GameTimer& gt)
     {
         latch = false;
     }
+
+    if (GetAsyncKeyState(VK_OEM_PLUS) & 0x8000)
+        m_brushSize = min(m_brushSize + 50.0f * delta, 100.0f);
+    if (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000)
+        m_brushSize = max(m_brushSize - 50.0f * delta, 5.0f);
+
+    static bool rLatch = false, gLatch = false, bLatch = false;
+    if (GetAsyncKeyState('R') & 0x8000)
+    {
+        if (!rLatch) { m_paintColor = { 1.0f, 0.0f, 0.0f }; rLatch = true; }
+    }
+    else { rLatch = false; }
+
+    if (GetAsyncKeyState('G') & 0x8000)
+    {
+        if (!gLatch) { m_paintColor = { 0.0f, 1.0f, 0.0f }; gLatch = true; }
+    }
+    else { gLatch = false; }
+
+    if (GetAsyncKeyState('B') & 0x8000)
+    {
+        if (!bLatch) { m_paintColor = { 0.0f, 0.0f, 1.0f }; bLatch = true; }
+    }
+    else { bLatch = false; }
 }
 
 void TerrainApp::UpdateCameraOrientation(const GameTimer& gt)
@@ -478,7 +689,7 @@ void TerrainApp::ComputeFrustumEdges(XMFLOAT4* pDest, const XMMATRIX& viewProj)
 void TerrainApp::CreateRootSignature()
 {
     CD3DX12_DESCRIPTOR_RANGE textureRange;
-    textureRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0, 0);
+    textureRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0, 0);
 
     CD3DX12_ROOT_PARAMETER rootParameters[4];
     rootParameters[0].InitAsConstantBufferView(0);
@@ -507,10 +718,43 @@ void TerrainApp::CreateRootSignature()
 void TerrainApp::CreateResourceViews()
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapConfig = {};
-    heapConfig.NumDescriptors = 3;
+    heapConfig.NumDescriptors = 4;
     heapConfig.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapConfig.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     md3dDevice->CreateDescriptorHeap(&heapConfig, IID_PPV_ARGS(&m_srvDescriptorHeap));
+
+    UINT paintWidth = 512;
+    UINT paintHeight = 512;
+    m_paintData.resize(paintWidth * paintHeight, 0x00000000);
+
+    D3D12_RESOURCE_DESC paintTexDesc = {};
+    paintTexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    paintTexDesc.Width = paintWidth;
+    paintTexDesc.Height = paintHeight;
+    paintTexDesc.DepthOrArraySize = 1;
+    paintTexDesc.MipLevels = 1;
+    paintTexDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    paintTexDesc.SampleDesc.Count = 1;
+    paintTexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+
+    md3dDevice->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE,
+        &paintTexDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_paintTexture));
+
+    const UINT64 paintUploadSize = GetRequiredIntermediateSize(m_paintTexture.Get(), 0, 1);
+    md3dDevice->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(paintUploadSize), D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&m_paintUploadBuffer));
+
+    D3D12_SUBRESOURCE_DATA paintData = {};
+    paintData.pData = m_paintData.data();
+    paintData.RowPitch = paintWidth * 4;
+    paintData.SlicePitch = paintData.RowPitch * paintHeight;
+
+    UpdateSubresources(mCommandList.Get(), m_paintTexture.Get(), m_paintUploadBuffer.Get(), 0, 0, 1, &paintData);
+    mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+        m_paintTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
 
     HRESULT hr = DirectX::CreateDDSTextureFromFile12(
         md3dDevice.Get(), mCommandList.Get(), L"TerrainDetails/003/Height_Out.dds",
@@ -649,6 +893,13 @@ void TerrainApp::CreateResourceViews()
             srvSpec.Texture2D.MipLevels = 1;
             md3dDevice->CreateShaderResourceView(m_fallbackWhite.Get(), &srvSpec, descriptorHandle);
         }
+        descriptorHandle.Offset(1, mCbvSrvUavDescriptorSize);
+    }
+
+    {
+        srvSpec.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvSpec.Texture2D.MipLevels = 1;
+        md3dDevice->CreateShaderResourceView(m_paintTexture.Get(), &srvSpec, descriptorHandle);
     }
 }
 

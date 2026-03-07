@@ -54,6 +54,7 @@ cbuffer cbTerrain : register(b2)
 Texture2D gHeightMap : register(t0);
 Texture2D gDiffuseMap : register(t1);
 Texture2D gNormalMap : register(t2);
+Texture2D gPaintMap : register(t3);
 
 SamplerState gsamLinearWrap : register(s0);
 SamplerState gsamLinearClamp : register(s1);
@@ -142,7 +143,10 @@ VertexOut VS(VertexIn vin)
 float4 PS(VertexOut pin) : SV_Target
 {
     float3 normal = normalize(pin.NormalW);
-    float3 albedo = gDiffuseMap.Sample(gsamLinearClamp, pin.TexC).rgb;
+    float3 baseColor = gDiffuseMap.Sample(gsamLinearClamp, pin.TexC).rgb;
+    float4 paintColor = gPaintMap.Sample(gsamLinearClamp, pin.TexC);
+    
+    float3 albedo = lerp(baseColor, paintColor.rgb, paintColor.a);
     
     float3 lightDir = normalize(-gLights[0].Direction);
     float ndotl = max(dot(normal, lightDir), 0.0f);
