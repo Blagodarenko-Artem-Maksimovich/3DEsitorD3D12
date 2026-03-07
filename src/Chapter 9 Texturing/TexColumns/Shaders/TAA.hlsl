@@ -32,7 +32,7 @@ VSOut VS(uint vid : SV_VertexID)
 {
     VSOut output;
     
-    // Координаты вершин полноэкранного треугольника
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
     float2 positions[3] =
     {
         float2(-1, -1),
@@ -67,11 +67,13 @@ PSOut PS(VSOut pin) : SV_Target
     
     historyColor = clamp(historyColor, BoxMin, BoxMax);
     
-    float motionFactor = saturate(motion * 100.0f); // масштаб под разрешение
+    float motionFactor = saturate(motion * 100.0f); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
     float adaptiveBlend = lerp(blendFactor, 1.0f, motionFactor);
 
     
     pout.BackBuffer = lerp(historyColor, currentColor, adaptiveBlend);
+    if (motion > 0.00001)
+    	pout.BackBuffer = float4(1.f, 0., 0., 1.);
     pout.HistoryTexture = lerp(historyColor, currentColor, adaptiveBlend);
     return pout;
     
