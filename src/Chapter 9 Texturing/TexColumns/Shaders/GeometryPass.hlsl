@@ -141,6 +141,8 @@ PSOutput PS(VertexOut pin)
     PSOutput outt;
 
     float4 diffuseTex = gDiffuseMap.Sample(gsamAnisotropicWrap, pin.TexC);
+    // Alpha-test (cutout). Note: we still store roughness in Albedo.a for deferred PBR.
+    clip(diffuseTex.a - 0.5f);
     outt.Albedo = diffuseTex * gDiffuseAlbedo;
     // Pack roughness into Albedo.a for deferred PBR.
     outt.Albedo.a = gRoughness;

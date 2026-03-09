@@ -34,6 +34,10 @@ using namespace DirectX::PackedVector;
 #pragma comment(lib, "D3D12.lib")
 // Note: we load DXC (dxcompiler.dll) dynamically at runtime for DXR shaders.
 
+// Last DXC diagnostics (useful when DXR silently falls back to shadow maps).
+static std::string gLastDxcErrors;
+static HRESULT gLastDxcStatus = S_OK;
+
 static ComPtr<ID3DBlob> CompileShaderDXC(
 	const std::wstring& filename,
 	const std::wstring& entrypoint,
@@ -49,11 +53,19 @@ static ComPtr<ID3DBlob> CompileShaderDXC(
 	{
 		sDxcompiler = LoadLibraryW(L"dxcompiler.dll");
 		if (!sDxcompiler)
-			ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+		{
+			gLastDxcStatus = HRESULT_FROM_WIN32(GetLastError());
+			gLastDxcErrors = "Failed to load dxcompiler.dll (missing or wrong architecture).";
+			ThrowIfFailed(gLastDxcStatus);
+		}
 
 		sDxcCreateInstance = (DxcCreateInstanceProc)GetProcAddress(sDxcompiler, "DxcCreateInstance");
 		if (!sDxcCreateInstance)
+		{
+			gLastDxcStatus = E_FAIL;
+			gLastDxcErrors = "dxcompiler.dll loaded but missing DxcCreateInstance export.";
 			ThrowIfFailed(E_FAIL);
+		}
 	}
 
 	// Avoid linking against CLSID_* globals (which would reintroduce dxcompiler.lib dependency).
@@ -104,10 +116,18 @@ static ComPtr<ID3DBlob> CompileShaderDXC(
 	ComPtr<IDxcBlobUtf8> errors;
 	ThrowIfFailed(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr));
 	if (errors && errors->GetStringLength() > 0)
+	{
+		gLastDxcErrors.assign(errors->GetStringPointer(), errors->GetStringPointer() + errors->GetStringLength());
 		OutputDebugStringA(errors->GetStringPointer());
+	}
+	else
+	{
+		gLastDxcErrors.clear();
+	}
 
 	HRESULT status = S_OK;
 	ThrowIfFailed(result->GetStatus(&status));
+	gLastDxcStatus = status;
 	ThrowIfFailed(status);
 
 	ComPtr<IDxcBlob> dxil;
@@ -437,7 +457,9 @@ private:
 		UINT _pad0 = 0;
 		float MaxDistance = 2000.0f;
 		float NormalBias = 0.02f;
-		DirectX::XMFLOAT2 _pad1 = { 0.0f, 0.0f };
+		DirectX::XMFLOAT2 AlphaUvScale = { 1.0f, 1.0f };
+		float AlphaCutoff = 0.5f;
+		float _pad1 = 0.0f;
 	};
 	std::unique_ptr<UploadBuffer<DxrShadowConstants>> mDxrShadowCB = nullptr;
 
@@ -855,6 +877,49 @@ void TexColumnsApp::Update(const GameTimer& gt)
 		(mDxrShadowMask ? "OK" : "null"),
 		(mDxrTlas ? "OK" : "null"),
 		(mDxrShadowPSO ? "OK" : "null"));
+	{
+		const bool dxrReady =
+			(mEnableDxrShadows) &&
+			(mDxrShadowRootSignature != nullptr) &&
+			(mDxrShadowPSO != nullptr) &&
+			(mDxrShadowMask != nullptr) &&
+			(mDxrTlas != nullptr) &&
+			(mDxrShadowCB != nullptr) &&
+			(mDxrShadowMaskSrvIndex >= 0) &&
+			(mDxrTlasSrvIndex >= 0);
+		// Selected light info.
+		int selType = -1;
+		int selCasts = 0;
+		for (const auto& l : mLights)
+			if ((int)l.LightCBIndex == mDxrShadowLightCBIndex)
+			{
+				selType = (int)l.type;
+				selCasts = l.CastsShadows ? 1 : 0;
+				break;
+			}
+		const bool dxrWillBeUsedForSelected =
+			dxrReady && (selType == 2) && (selCasts != 0);
+
+		ImGui::Text("DXR ready: %s", dxrReady ? "YES" : "NO");
+		ImGui::Text("Selected LightCBIndex=%d  type=%d  castsShadows=%d  DXR used=%s",
+			mDxrShadowLightCBIndex, selType, selCasts, dxrWillBeUsedForSelected ? "YES" : "NO");
+		ImGui::Text("Heap indices: TLAS_SRV=%d  Mask_SRV=%d  Mask_UAV=%d", (int)mDxrTlasSrvIndex, (int)mDxrShadowMaskSrvIndex, (int)mDxrShadowMaskUavIndex);
+		if (!gLastDxcErrors.empty() || FAILED(gLastDxcStatus))
+		{
+			ImGui::Separator();
+			ImGui::Text("DXC status: 0x%08X", (unsigned)gLastDxcStatus);
+			ImGui::TextWrapped("DXC errors/warnings (last):\n%s", gLastDxcErrors.c_str());
+		}
+		if (ImGui::Button("Rebuild DXR (PSO/TLAS/Mask)"))
+		{
+			FlushCommandQueue();
+			BuildDxrShadowRootSignature();
+			BuildDxrShadowPSO();
+			CreateDxrShadowMaskResources();
+			BuildDxrAccelerationStructures();
+			CreateDxrShadowDescriptors();
+		}
+	}
 	ImGui::End();
 
 	// Recreate DXR shadow mask if downscale changed (expensive; only when user tweaks).
@@ -942,6 +1007,9 @@ void TexColumnsApp::Update(const GameTimer& gt)
 		dxr.Downscale = (UINT)((mDxrShadowDownscale <= 1) ? 1 : (mDxrShadowDownscale <= 2) ? 2 : 4);
 		dxr.MaxDistance = mDxrMaxDistance;
 		dxr.NormalBias = mDxrNormalBias;
+		// Match wireFenceBox TexTransform scaling(2,2,1). For other cutouts this can be generalized later.
+		dxr.AlphaUvScale = { 2.0f, 2.0f };
+		dxr.AlphaCutoff = 0.5f;
 		mDxrShadowCB->CopyData(mCurrFrameResourceIndex, dxr);
 	}
 }
@@ -1770,14 +1838,27 @@ void TexColumnsApp::BuildLightingRootSignature()
 // shadow root signature 
 void TexColumnsApp::BuildShadowPassRootSignature()
 {
-	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+	// Shadow pass supports alpha-tested casters (sample diffuse alpha).
+	CD3DX12_DESCRIPTOR_RANGE diffuseRange;
+	diffuseRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0
+
+	CD3DX12_ROOT_PARAMETER slotRootParameter[3];
 
 	slotRootParameter[0].InitAsConstantBufferView(0); // ObjectConstants (b0)
 	slotRootParameter[1].InitAsConstantBufferView(1); // ShadowPassConstants (b1 - gLightViewProj)
+	slotRootParameter[2].InitAsDescriptorTable(1, &diffuseRange, D3D12_SHADER_VISIBILITY_PIXEL);
+
+	const CD3DX12_STATIC_SAMPLER_DESC linearWrapSampler(
+		0, // s0
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+
 	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc;
 	rootSigDesc.Init(
 		_countof(slotRootParameter), slotRootParameter,
-		0, nullptr, // No static samplers needed for basic shadow map generation
+		1, &linearWrapSampler,
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 	ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -1850,25 +1931,35 @@ void TexColumnsApp::BuildPostProcessRootSignature()
 void TexColumnsApp::BuildDxrShadowRootSignature()
 {
 	// DXR 1.1 inline ray tracing compute root signature:
-	// t0 = TLAS, t1 = Position, t2 = Normal, u0 = ShadowMask, b0 = constants
+	// t0 = TLAS, t1 = Position, t2 = Normal, t3 = AlphaCutoutTex, u0 = ShadowMask, b0 = constants
 	CD3DX12_DESCRIPTOR_RANGE tlasRange;
 	tlasRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 	CD3DX12_DESCRIPTOR_RANGE posRange;
 	posRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);
 	CD3DX12_DESCRIPTOR_RANGE nrmRange;
 	nrmRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2);
+	CD3DX12_DESCRIPTOR_RANGE alphaRange;
+	alphaRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3);
 	CD3DX12_DESCRIPTOR_RANGE outRange;
 	outRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
 
-	CD3DX12_ROOT_PARAMETER params[5];
+	CD3DX12_ROOT_PARAMETER params[6];
 	params[0].InitAsDescriptorTable(1, &tlasRange);
 	params[1].InitAsDescriptorTable(1, &posRange);
 	params[2].InitAsDescriptorTable(1, &nrmRange);
-	params[3].InitAsDescriptorTable(1, &outRange);
-	params[4].InitAsConstantBufferView(0);
+	params[3].InitAsDescriptorTable(1, &alphaRange);
+	params[4].InitAsDescriptorTable(1, &outRange);
+	params[5].InitAsConstantBufferView(0);
+
+	const CD3DX12_STATIC_SAMPLER_DESC linearWrapSampler(
+		0, // s0
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 
 	CD3DX12_ROOT_SIGNATURE_DESC rsDesc;
-	rsDesc.Init(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+	rsDesc.Init(_countof(params), params, 1, &linearWrapSampler, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
 	ComPtr<ID3DBlob> serialized = nullptr;
 	ComPtr<ID3DBlob> errors = nullptr;
@@ -2476,6 +2567,7 @@ void TexColumnsApp::BuildShadersAndInputLayout()
 	mShaders["lightingPS"] = d3dUtil::CompileShader(L"Shaders\\PBRLightingPass.hlsl", nullptr, "PS", "ps_5_0");
 	mShaders["lightingPSDebug"] = d3dUtil::CompileShader(L"Shaders\\PBRLightingPass.hlsl", nullptr, "PS_debug", "ps_5_0");
 	mShaders["shadowVS"] = d3dUtil::CompileShader(L"Shaders\\ShadowMap.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["shadowPS"] = d3dUtil::CompileShader(L"Shaders\\ShadowMap.hlsl", nullptr, "PS", "ps_5_1");
 	mShaders["postprocessVS"] = d3dUtil::CompileShader(L"Shaders\\PostProcess.hlsl", nullptr, "VS", "vs_5_0");
 	mShaders["postprocessPS"] = d3dUtil::CompileShader(L"Shaders\\PostProcess.hlsl", nullptr, "PS", "ps_5_0");
 	mShaders["taaResolveVS"] = d3dUtil::CompileShader(L"Shaders\\TAAResolve.hlsl", nullptr, "VS", "vs_5_1");
@@ -2903,6 +2995,7 @@ void TexColumnsApp::BuildPSOs()
 		pso.pRootSignature = mShadowPassRootSignature.Get();
 		pso.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() };
 		pso.VS = { (BYTE*)mShaders["shadowVS"]->GetBufferPointer(), mShaders["shadowVS"]->GetBufferSize() };
+		pso.PS = { (BYTE*)mShaders["shadowPS"]->GetBufferPointer(), mShaders["shadowPS"]->GetBufferSize() };
 
 		pso.NumRenderTargets = 0;
 		pso.DSVFormat = SHADOW_MAP_DSV_FORMAT;
@@ -3079,6 +3172,18 @@ void TexColumnsApp::BuildMaterials()
 	CreateMaterial("MovingRed", 0, TexOffsets["textures/white1x1"], TexOffsets["textures/default_nmap"],
 		XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f), XMFLOAT3(0.05f, 0.05f, 0.05f), 0.3f, 0.0f);
 
+	// Alpha-cutout test material (wire fence).
+	// NOTE: GeometryPass.hlsl and ShadowMap.hlsl both do clip(alpha-0.5), so holes are visible and cast correct shadows.
+	if (TexOffsets.find("textures/WireFence") != TexOffsets.end())
+	{
+		CreateMaterial("WireFenceMat", 0,
+			TexOffsets["textures/WireFence"],
+			TexOffsets["textures/default_nmap"],
+			XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f),
+			XMFLOAT3(0.04f, 0.04f, 0.04f),
+			0.9f, 0.0f);
+	}
+
 	// PBR test spheres (metallic/roughness grid)
 	const int kPbrCols = 5; // metallic
 	const int kPbrRows = 5; // roughness
@@ -3184,6 +3289,39 @@ void TexColumnsApp::BuildRenderItems()
 	RenderCustomMesh("building", "sponza", "", XMFLOAT3(0.07, 0.07, 0.07), XMFLOAT3(0, 3.14 / 2, 0), XMFLOAT3(0, 0, 0));
 	RenderCustomMesh("nigga", "negr", "NiggaMat", XMFLOAT3(3, 3, 3), XMFLOAT3(0, 3.14, 0), XMFLOAT3(6, 5, 0));
 	RenderCustomMesh("nigga2", "negr", "NiggaMat", XMFLOAT3(3, 3, 3), XMFLOAT3(0, -3.14 / 2, 0), XMFLOAT3(-10, 7, 30));
+
+	// Alpha-cutout visibility/shadow test: a cube with WireFence.dds next to the main character.
+	if (mMaterials.find("WireFenceMat") != mMaterials.end())
+	{
+		auto fenceBox = std::make_unique<RenderItem>();
+		fenceBox->Name = "wireFenceBox";
+
+		const float x = 10.0f;
+		const float y = 5.0f;
+		const float z = 0.0f;
+
+		fenceBox->Position = { x, y, z };
+		fenceBox->RotationAngle = { 0.0f, 0.0f, 0.0f };
+		fenceBox->Scale = { 4.0f, 4.0f, 4.0f }; // thin "fence" slab
+		fenceBox->TranslationM = XMMatrixTranslation(x, y, z);
+		fenceBox->RotationM = XMMatrixRotationRollPitchYaw(0.0f, 0.0f, 0.0f);
+		fenceBox->ScaleM = XMMatrixScaling(fenceBox->Scale.x, fenceBox->Scale.y, fenceBox->Scale.z);
+
+		XMStoreFloat4x4(&fenceBox->TexTransform, XMMatrixScaling(2.0f, 2.0f, 1.0f));
+		XMStoreFloat4x4(&fenceBox->World, fenceBox->ScaleM * fenceBox->RotationM * fenceBox->TranslationM);
+		fenceBox->PrevWorld = fenceBox->World;
+
+		fenceBox->ObjCBIndex = (UINT)mAllRitems.size();
+		fenceBox->Mat = mMaterials["WireFenceMat"].get();
+		fenceBox->BaseMat = fenceBox->Mat;
+		fenceBox->Geo = mGeometries["shapeGeo"].get();
+		fenceBox->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		fenceBox->IndexCount = fenceBox->Geo->DrawArgs["box"].IndexCount;
+		fenceBox->StartIndexLocation = fenceBox->Geo->DrawArgs["box"].StartIndexLocation;
+		fenceBox->BaseVertexLocation = fenceBox->Geo->DrawArgs["box"].BaseVertexLocation;
+
+		mAllRitems.push_back(std::move(fenceBox));
+	}
 
 	// PBR test spheres grid (5x5: metallic across X, roughness across Z)
 	{
@@ -3314,7 +3452,9 @@ void TexColumnsApp::Draw(const GameTimer& gt)
 }
 void TexColumnsApp::DrawSceneToShadowMap()
 {
-
+	// Shadow pass now samples diffuse alpha, so we need the SRV heap.
+	ID3D12DescriptorHeap* heaps[] = { mSrvDescriptorHeap.Get() };
+	mCommandList->SetDescriptorHeaps(_countof(heaps), heaps);
 
 	UINT shadowCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassShadowConstants));
 	for (auto light : mLights)
@@ -3355,6 +3495,14 @@ void TexColumnsApp::DrawSceneToShadowMap()
 
 					D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
 					mCommandList->SetGraphicsRootConstantBufferView(0, objCBAddress);
+
+					int diffuseIdx = (ri->Mat != nullptr) ? ri->Mat->DiffuseSrvHeapIndex : -1;
+					if (diffuseIdx < 0)
+						diffuseIdx = TexOffsets["textures/white1x1"];
+
+					CD3DX12_GPU_DESCRIPTOR_HANDLE diffuseSrv(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+					diffuseSrv.Offset(diffuseIdx, mCbvSrvDescriptorSize);
+					mCommandList->SetGraphicsRootDescriptorTable(2, diffuseSrv);
 
 					mCommandList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 				}
@@ -3521,7 +3669,7 @@ void TexColumnsApp::DeferredDraw(const GameTimer& gt)
 	for (auto& light : mLights)
 	{
 		const bool useDxrThisLight =
-			(mEnableDxrShadows && mDxrShadowMask && mDxrTlas && mDxrShadowMaskSrvIndex >= 0) &&
+			(mEnableDxrShadows && mDxrShadowRootSignature && mDxrShadowPSO && mDxrShadowMask && mDxrTlas && mDxrShadowMaskSrvIndex >= 0) &&
 			(light.CastsShadows) &&
 			(light.type == 2) && // directional only (one mask per frame)
 			(light.LightCBIndex == mDxrShadowLightCBIndex);
@@ -4044,9 +4192,13 @@ void TexColumnsApp::BuildDxrAccelerationStructures()
 			memset(&inst, 0, sizeof(inst));
 			inst.InstanceID = i;
 			inst.InstanceContributionToHitGroupIndex = 0;
-			inst.InstanceMask = 0xFF;
+			// Instance masks:
+			// 0x01 = opaque occluders (fast path, FORCE_OPAQUE)
+			// 0x02 = alpha-cutout occluders (manual alpha test in RayQuery)
+			inst.InstanceMask = (ri->Name == "wireFenceBox") ? 0x02 : 0x01;
 			// Disable triangle culling to avoid missing occluders due to winding/one-sided meshes.
-			inst.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
+			inst.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE |
+				((ri->Name == "wireFenceBox") ? D3D12_RAYTRACING_INSTANCE_FLAG_FORCE_NON_OPAQUE : D3D12_RAYTRACING_INSTANCE_FLAG_FORCE_OPAQUE);
 
 			// DXR instance transform is a row-major 3x4 that expects translation in the last column.
 			// Our RenderItem::World is used with mul(pos, gWorld) in HLSL (row-vector convention),
@@ -4192,13 +4344,21 @@ void TexColumnsApp::DispatchDxrShadowMask(ID3D12GraphicsCommandList* cmdList)
 	cmdList->SetComputeRootDescriptorTable(1, gpuAt(mGBufferSrvIndexPosition));
 	// t2 = Normal
 	cmdList->SetComputeRootDescriptorTable(2, gpuAt(mGBufferSrvIndexNormal));
+	// t3 = Alpha cutout texture (WireFence)
+	{
+		int idx = -1;
+		auto it = TexOffsets.find("textures/WireFence");
+		if (it != TexOffsets.end()) idx = it->second;
+		if (idx < 0) idx = TexOffsets["textures/white1x1"];
+		cmdList->SetComputeRootDescriptorTable(3, gpuAt(idx));
+	}
 	// u0 = Shadow mask UAV
-	cmdList->SetComputeRootDescriptorTable(3, gpuAt(mDxrShadowMaskUavIndex));
+	cmdList->SetComputeRootDescriptorTable(4, gpuAt(mDxrShadowMaskUavIndex));
 
 	// b0 = constants (per-frame)
 	UINT cbByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(DxrShadowConstants));
 	D3D12_GPU_VIRTUAL_ADDRESS cbAddr = mDxrShadowCB->Resource()->GetGPUVirtualAddress() + (UINT64)mCurrFrameResourceIndex * cbByteSize;
-	cmdList->SetComputeRootConstantBufferView(4, cbAddr);
+	cmdList->SetComputeRootConstantBufferView(5, cbAddr);
 
 	auto md = mDxrShadowMask->GetDesc();
 	const UINT maskW = (UINT)md.Width;

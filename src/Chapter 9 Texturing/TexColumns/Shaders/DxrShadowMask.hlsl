@@ -7,8 +7,11 @@
 RaytracingAccelerationStructure gScene : register(t0);
 Texture2D<float4> gPositionMap : register(t1); // xyz = world position
 Texture2D<float4> gNormalMap   : register(t2); // xyz = world normal (encoded), a = metallic
+Texture2D<float4> gAlphaCutoutTex : register(t3); // WireFence alpha (cutout occluder)
 
 RWTexture2D<float> gShadowMask : register(u0);
+
+SamplerState gsamLinearWrap : register(s0);
 
 cbuffer cbDxrShadow : register(b0)
 {
@@ -21,7 +24,9 @@ cbuffer cbDxrShadow : register(b0)
     uint   _pad0;
     float  gMaxDistance;    // ray length
     float  gNormalBias;     // origin offset along normal
-    float2 _pad1;
+    float2 gAlphaUvScale;   // cutout UV tiling (match object TexTransform)
+    float  gAlphaCutoff;    // 0..1 (0.5 default)
+    float  _pad1;
 };
 
 // Simple hash (pixel + frame) for rotation/jitter
@@ -105,15 +110,60 @@ void CS(uint3 dtid : SV_DispatchThreadID)
         ray.TMin = 0.001f;
         ray.TMax = tMax;
 
-        RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
-        rq.TraceRayInline(gScene,
-            RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES,
-            0xFF, ray);
+        // 1) Opaque occluders (instance mask 0x01).
+        {
+            RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
+            rq.TraceRayInline(gScene,
+                RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES,
+                0x01, ray);
+            while (rq.Proceed()) { }
+            if (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+            {
+                visible += 0.0f;
+                continue;
+            }
+        }
 
-        while (rq.Proceed()) { }
+        // 2) Alpha-cutout occluders (instance mask 0x02): manually commit hit if alpha passes.
+        bool cutoutHit = false;
+        {
+            RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rq;
+            rq.TraceRayInline(gScene, RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0x02, ray);
 
-        bool hit = (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
-        visible += hit ? 0.0f : 1.0f;
+            while (rq.Proceed())
+            {
+                if (rq.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+                {
+                    // Candidate hit point in OBJECT space.
+                    float t = rq.CandidateTriangleRayT();
+                    float3 o = rq.CandidateObjectRayOrigin();
+                    float3 d = rq.CandidateObjectRayDirection();
+                    float3 pObj = o + d * t;
+
+                    // Approximate box/plane UVs: pick dominant axis and use the other two.
+                    float3 ap = abs(pObj);
+                    float2 uv;
+                    if (ap.z >= ap.x && ap.z >= ap.y)      uv = pObj.xy;
+                    else if (ap.x >= ap.y)                 uv = float2(pObj.z, pObj.y);
+                    else                                    uv = float2(pObj.x, pObj.z);
+
+                    uv = uv + 0.5f;
+                    uv *= gAlphaUvScale;
+
+                    float a = gAlphaCutoutTex.SampleLevel(gsamLinearWrap, uv, 0).a;
+                    if (a >= gAlphaCutoff)
+                    {
+                        rq.CommitNonOpaqueTriangleHit();
+                        cutoutHit = true;
+                        break;
+                    }
+                    // If alpha fails, do NOT commit the candidate hit.
+                    // RayQuery will continue searching for another candidate on next Proceed().
+                }
+            }
+        }
+
+        visible += cutoutHit ? 0.0f : 1.0f;
     }
 
     gShadowMask[pix] = visible / (float)samples;
